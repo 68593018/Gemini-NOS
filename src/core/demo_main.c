@@ -12,28 +12,29 @@ extern nos_component_t g_comp2;
 extern nos_status_t nos_scheduler_run_loop(nos_thread_t *self);
 
 int main() {
-    printf("--- NOS Component Async Scheduling Demo ---\n");
+    printf("--- NOS Component Epoll-Driven Demo ---\n");
 
     /* 1. 初始化调度器线程对象 */
-    nos_thread_t main_thread = {
-        .thread_id = 1,
-        .name = "MainWorker"
-    };
+    nos_thread_t main_thread;
+    nos_scheduler_init_thread(&main_thread, 1, "MainWorker");
 
     /* 2. 注册组件到线程 */
     nos_scheduler_register_component(1, &g_comp1);
     nos_scheduler_register_component(1, &g_comp2);
 
-    /* 3. 调用组件初始化回调 */
+    /* 3. 动态注册服务提供者 (C2 提供 SERVICE_HELLO_ID) */
+    nos_service_register_provider(2, &g_comp2);
+
+    /* 4. 调用组件初始化回调 */
     g_comp1.init(&g_comp1);
     g_comp2.init(&g_comp2);
 
-    /* 4. 启动组件 (此阶段 C1 会发送一个异步消息到队列) */
-    printf("\n--- Starting Components (Async) ---\n");
+    /* 5. 启动组件 (触发异步请求) */
+    printf("\n--- Starting Components ---\n");
     g_comp1.start(&g_comp1);
 
-    /* 5. 进入主调度循环 (开始处理队列中的消息) */
-    printf("\n--- Entering Event Loop ---\n");
+    /* 6. 进入主调度循环 */
+    printf("\n--- Entering Epoll Loop ---\n");
     nos_scheduler_run_loop(&main_thread);
 
     printf("\n--- Demo Finished ---\n");

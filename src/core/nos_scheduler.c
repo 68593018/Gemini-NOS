@@ -1,90 +1,154 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
+#include <unistd.h>
+#include <sys/epoll.h>
+#include <fcntl.h>
 #include "nos_scheduler.h"
 #include "nos_service.h"
 
 #define MAX_QUEUE_SIZE 1024
+#define MAX_EVENTS 10
 
-/* 内部消息队列结构 */
-static nos_service_msg_t *g_msg_queue[MAX_QUEUE_SIZE];
-static int g_head = 0;
-static int g_tail = 0;
-static bool g_keep_running = true;
+/* 全局服务注册表 (简化版：Service ID -> Component Pointer) */
+typedef struct {
+    uint32_t service_id;
+    nos_component_t *provider;
+} service_entry_t;
 
-/* 内部组件注册表 (简化版) */
-static nos_component_t *g_components[32];
-static uint32_t g_comp_count = 0;
+static service_entry_t g_service_registry[64];
+static uint32_t g_service_count = 0;
 
-/* 实现：向队列投递消息 (异步) */
+/* 当前主线程指针 (单线程演示用) */
+static nos_thread_t *g_main_thread_ptr = NULL;
+
+nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const char *name) {
+    thread->thread_id = id;
+    thread->name = name;
+    thread->component_count = 0;
+    thread->components = malloc(sizeof(nos_component_t*) * 32);
+    
+    /* 初始化消息队列 */
+    thread->msg_queue = malloc(sizeof(nos_service_msg_t*) * MAX_QUEUE_SIZE);
+    thread->head = thread->tail = 0;
+    pthread_mutex_init(&thread->queue_lock, NULL);
+
+    /* 初始化 epoll 和唤醒管道 */
+    thread->epoll_fd = epoll_create1(0);
+    pipe(thread->notify_fd);
+    
+    // 设置 pipe 读端为非阻塞
+    fcntl(thread->notify_fd[0], F_SETFL, O_NONBLOCK);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = thread->notify_fd[0];
+    epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, thread->notify_fd[0], &ev);
+
+    g_main_thread_ptr = thread;
+    return NOS_OK;
+}
+
+nos_status_t nos_service_register_provider(uint32_t service_id, nos_component_t *provider) {
+    if (g_service_count >= 64) return NOS_ERR;
+    g_service_registry[g_service_count].service_id = service_id;
+    g_service_registry[g_service_count].provider = provider;
+    g_service_count++;
+    return NOS_OK;
+}
+
+nos_status_t nos_scheduler_register_component(uint32_t thread_id, nos_component_t *comp) {
+    if (!g_main_thread_ptr) return NOS_ERR;
+    g_main_thread_ptr->components[g_main_thread_ptr->component_count++] = comp;
+    return NOS_OK;
+}
+
+/* 异步发送消息：写入队列并唤醒 epoll */
 nos_status_t nos_service_msg_send(nos_service_msg_t *msg) {
-    int next_tail = (g_tail + 1) % MAX_QUEUE_SIZE;
-    if (next_tail == g_head) {
-        printf("[Scheduler] Error: Message queue full!\n");
+    nos_thread_t *target_thread = g_main_thread_ptr; // 演示版固定主线程
+    
+    pthread_mutex_lock(&target_thread->queue_lock);
+    int next_tail = (target_thread->tail + 1) % MAX_QUEUE_SIZE;
+    if (next_tail == target_thread->head) {
+        pthread_mutex_unlock(&target_thread->queue_lock);
         return NOS_ERR_BUSY;
     }
 
-    /* 拷贝消息到队列 (深度拷贝以模拟真实异步) */
     size_t full_len = sizeof(nos_service_msg_t) + msg->payload_len;
-    nos_service_msg_t *new_msg = (nos_service_msg_t *)malloc(full_len);
+    nos_service_msg_t *new_msg = malloc(full_len);
     memcpy(new_msg, msg, full_len);
 
-    g_msg_queue[g_tail] = new_msg;
-    g_tail = next_tail;
-    return NOS_OK;
-}
+    target_thread->msg_queue[target_thread->tail] = new_msg;
+    target_thread->tail = next_tail;
+    pthread_mutex_unlock(&target_thread->queue_lock);
 
-/* 实现：注册组件 */
-nos_status_t nos_scheduler_register_component(uint32_t thread_id, nos_component_t *comp) {
-    if (g_comp_count >= 32) return NOS_ERR;
-    g_components[g_comp_count++] = comp;
-    return NOS_OK;
-}
-
-/* 实现：路由与分发消息 */
-static void dispatch_message(nos_service_msg_t *msg) {
-    nos_component_t *target = NULL;
-
-    /* 简单的服务路由逻辑 */
-    for (uint32_t i = 0; i < g_comp_count; i++) {
-        // 匹配逻辑：如果指定了服务 ID 且组件 ID 匹配 (本例简化) 
-        // 或者直接根据目标组件 ID 匹配 (用于 Rsp)
-        if ((msg->dst_service != 0 && g_components[i]->id == msg->dst_service) || 
-            (msg->dst_service == 0 && g_components[i]->id == 1)) { // 强制回包给 1
-            target = g_components[i];
-            break;
-        }
-    }
-
-    if (target && target->on_msg) {
-        target->on_msg(target, msg);
-    }
-
-    free(msg); // 处理完后释放内存
-}
-
-/* 实现：核心调度循环 */
-nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
-    printf("[Scheduler] Thread '%s' loop started.\n", self->name);
+    /* 唤醒 epoll_wait */
+    char notify_cmd = 'm';
+    write(target_thread->notify_fd[1], &notify_cmd, 1);
     
-    int processed_count = 0;
-    while (g_keep_running) {
-        /* 1. 检查队列是否有消息 */
-        if (g_head != g_tail) {
-            nos_service_msg_t *msg = g_msg_queue[g_head];
-            g_head = (g_head + 1) % MAX_QUEUE_SIZE;
+    return NOS_OK;
+}
 
-            /* 2. 分发消息给组件 */
-            dispatch_message(msg);
-            processed_count++;
+static void process_thread_messages(nos_thread_t *self) {
+    char buf[16];
+    while (read(self->notify_fd[0], buf, sizeof(buf)) > 0); // 清空管道
+
+    while (1) {
+        nos_service_msg_t *msg = NULL;
+        pthread_mutex_lock(&self->queue_lock);
+        if (self->head != self->tail) {
+            msg = self->msg_queue[self->head];
+            self->head = (self->head + 1) % MAX_QUEUE_SIZE;
+        }
+        pthread_mutex_unlock(&self->queue_lock);
+
+        if (!msg) break;
+
+        /* 动态寻址并分发 */
+        nos_component_t *target = NULL;
+        if (msg->dst_service != 0) {
+            for (uint32_t i = 0; i < g_service_count; i++) {
+                if (g_service_registry[i].service_id == msg->dst_service) {
+                    target = g_service_registry[i].provider;
+                    break;
+                }
+            }
         } else {
-            /* 3. 队列为空，简单退出模拟 (真实系统会在这里 epoll_wait) */
-            if (processed_count > 0) {
-                 printf("[Scheduler] No more messages, finishing demo loop.\n");
-                 g_keep_running = false;
+            // 点对点回包逻辑：找到 ID 匹配的组件
+            for (uint32_t i = 0; i < self->component_count; i++) {
+                if (self->components[i]->id == 1) { // 演示简化：回包给 ID=1
+                    target = self->components[i];
+                    break;
+                }
+            }
+        }
+
+        if (target && target->on_msg) {
+            target->on_msg(target, msg);
+        }
+        free(msg);
+    }
+}
+
+nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
+    printf("[Scheduler] Thread '%s' (epoll-driven) loop started.\n", self->name);
+    struct epoll_event events[MAX_EVENTS];
+    
+    int loop_count = 0;
+    while (loop_count < 10) { // 演示版增加循环限制防止死循环
+        int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, 100); // 100ms 超时
+        if (nfds == 0) {
+            loop_count++; // 超时代表没活干了
+            continue;
+        }
+
+        for (int i = 0; i < nfds; i++) {
+            if (events[i].data.fd == self->notify_fd[0]) {
+                process_thread_messages(self);
+                loop_count = 0; // 干了活就重置计数
             }
         }
     }
+    printf("[Scheduler] Loop finished.\n");
     return NOS_OK;
 }
