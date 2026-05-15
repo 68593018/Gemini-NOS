@@ -1,0 +1,11 @@
+# Build artifacts
+nos_demo
+nos_epoll_demo
+nos_async_demo
+
+# Object files
+*.o
+
+# Temporary files
+*.swp
+*~

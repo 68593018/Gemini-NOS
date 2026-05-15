@@ -134,21 +134,15 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
     printf("[Scheduler] Thread '%s' (epoll-driven) loop started.\n", self->name);
     struct epoll_event events[MAX_EVENTS];
     
-    int loop_count = 0;
-    while (loop_count < 10) { // 演示版增加循环限制防止死循环
-        int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, 100); // 100ms 超时
-        if (nfds == 0) {
-            loop_count++; // 超时代表没活干了
-            continue;
-        }
+    while (1) {
+        int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, -1); // 永久阻塞等待
+        if (nfds < 0) break;
 
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == self->notify_fd[0]) {
                 process_thread_messages(self);
-                loop_count = 0; // 干了活就重置计数
             }
         }
     }
-    printf("[Scheduler] Loop finished.\n");
     return NOS_OK;
 }
