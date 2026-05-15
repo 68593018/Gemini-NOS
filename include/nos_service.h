@@ -29,6 +29,13 @@ typedef struct {
 nos_status_t nos_service_msg_send(nos_service_msg_t *msg);
 
 /**
+ * @brief 注册远端服务路由信息
+ * @param service_id 服务 ID
+ * @param uds_path 目标进程监听的 UDS 路径
+ */
+nos_status_t nos_service_register_remote(uint32_t service_id, const char *uds_path);
+
+/**
  * @brief 嵌入式服务获取接口
  * @param name 服务名称
  * @return void* 返回服务操作表指针，未找到返回 NULL
