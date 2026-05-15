@@ -5,6 +5,17 @@
 #include "nos_component.h"
 
 /**
+ * @brief 文件描述符事件回调
+ */
+typedef void (*nos_fd_callback_t)(int fd, void *arg);
+
+typedef struct {
+    int fd;
+    nos_fd_callback_t callback;
+    void *arg;
+} nos_fd_entry_t;
+
+/**
  * @brief 调度器线程对象
  */
 typedef struct nos_thread_s {
@@ -21,12 +32,20 @@ typedef struct nos_thread_s {
     nos_component_t **components;
     uint32_t component_count;
 
+    nos_fd_entry_t *fd_entries;
+    uint32_t fd_count;
+
     /**
      * @brief 启动调度循环
      */
     nos_status_t (*run_loop)(struct nos_thread_s *self);
 
 } nos_thread_t;
+
+/**
+ * @brief 向调度器添加需要监听的文件描述符（如 Socket）
+ */
+nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg);
 
 /**
  * @brief 向系统注册一个服务提供者

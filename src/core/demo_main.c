@@ -2,6 +2,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include "nos_component.h"
 #include "nos_service.h"
 #include "nos_scheduler.h"
@@ -9,6 +10,10 @@
 /* 声明外部组件实例 */
 extern nos_component_t g_comp1;
 extern nos_component_t g_comp2;
+
+/* 声明调度器内部函数 (如果不在头文件中) */
+nos_status_t nos_scheduler_register_component(uint32_t thread_id, nos_component_t *comp);
+void nos_scheduler_run_loop(nos_thread_t *self);
 
 /* 线程启动函数包装器 */
 static void* scheduler_thread_entry(void *arg) {

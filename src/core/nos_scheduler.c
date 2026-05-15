@@ -28,6 +28,9 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     thread->component_count = 0;
     thread->components = malloc(sizeof(nos_component_t*) * 32);
     
+    thread->fd_count = 0;
+    thread->fd_entries = malloc(sizeof(nos_fd_entry_t) * 32);
+
     /* 初始化消息队列 */
     thread->msg_queue = malloc(sizeof(nos_service_msg_t*) * MAX_QUEUE_SIZE);
     thread->head = thread->tail = 0;
@@ -42,7 +45,7 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
 
     struct epoll_event ev;
     ev.events = EPOLLIN;
-    ev.data.fd = thread->notify_fd[0];
+    ev.data.fd = thread->notify_fd[0]; // 唤醒管道特殊处理，直接存 FD
     epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, thread->notify_fd[0], &ev);
 
     g_main_thread_ptr = thread;
@@ -60,6 +63,26 @@ nos_status_t nos_service_register_provider(uint32_t service_id, nos_component_t 
 nos_status_t nos_scheduler_register_component(uint32_t thread_id, nos_component_t *comp) {
     if (!g_main_thread_ptr) return NOS_ERR;
     g_main_thread_ptr->components[g_main_thread_ptr->component_count++] = comp;
+    return NOS_OK;
+}
+
+nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg) {
+    if (thread->fd_count >= 32) return NOS_ERR;
+
+    nos_fd_entry_t *entry = &thread->fd_entries[thread->fd_count];
+    entry->fd = fd;
+    entry->callback = callback;
+    entry->arg = arg;
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.ptr = entry; // 携带回调条目信息
+    if (epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+        perror("epoll_ctl_add_fd");
+        return NOS_ERR;
+    }
+
+    thread->fd_count++;
     return NOS_OK;
 }
 
@@ -135,12 +158,23 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
     struct epoll_event events[MAX_EVENTS];
     
     while (1) {
-        int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, -1); // 永久阻塞等待
+        int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, -1); 
         if (nfds < 0) break;
 
         for (int i = 0; i < nfds; i++) {
+            /* 
+             * 区分唤醒管道和外部 FD：
+             * 唤醒管道注册时使用的是 ev.data.fd，
+             * 外部 FD 注册时使用的是 ev.data.ptr。
+             */
             if (events[i].data.fd == self->notify_fd[0]) {
                 process_thread_messages(self);
+            } else {
+                /* 处理外部 FD 回调 */
+                nos_fd_entry_t *entry = (nos_fd_entry_t *)events[i].data.ptr;
+                if (entry && entry->callback) {
+                    entry->callback(entry->fd, entry->arg);
+                }
             }
         }
     }
