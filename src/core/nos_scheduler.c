@@ -117,36 +117,8 @@ nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_
     return NOS_OK;
 }
 
-/* 异步发送消息：本地入队或跨进程发送 */
-nos_status_t nos_service_msg_send(nos_service_msg_t *msg) {
-    service_entry_t *entry = find_service_entry(msg->dst_service);
-    
-    /* 1. 处理远端服务发送 */
-    if (entry && entry->is_remote) {
-        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (fd < 0) return NOS_ERR;
-
-        struct sockaddr_un addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        strncpy(addr.sun_path, entry->remote_uds_path, sizeof(addr.sun_path) - 1);
-
-        if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-            close(fd);
-            return NOS_ERR;
-        }
-
-        size_t full_len = sizeof(nos_service_msg_t) + msg->payload_len;
-        if (write(fd, msg, full_len) < (ssize_t)full_len) {
-            close(fd);
-            return NOS_ERR;
-        }
-
-        close(fd); // 演示版：短连接发送。
-        return NOS_OK;
-    }
-
-    /* 2. 处理本地服务发送 */
+/* 本地传输：消息入队并唤醒 */
+static nos_status_t nos_transport_local_send(nos_service_msg_t *msg) {
     nos_thread_t *target_thread = g_main_thread_ptr; // 演示版固定主线程
     
     pthread_mutex_lock(&target_thread->queue_lock);
@@ -169,6 +141,44 @@ nos_status_t nos_service_msg_send(nos_service_msg_t *msg) {
     write(target_thread->notify_fd[1], &notify_cmd, 1);
     
     return NOS_OK;
+}
+
+/* 远端传输：通过 UDS 发送 */
+static nos_status_t nos_transport_remote_uds_send(nos_service_msg_t *msg, const char *uds_path) {
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) return NOS_ERR;
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, uds_path, sizeof(addr.sun_path) - 1);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        return NOS_ERR;
+    }
+
+    size_t full_len = sizeof(nos_service_msg_t) + msg->payload_len;
+    if (write(fd, msg, full_len) < (ssize_t)full_len) {
+        close(fd);
+        return NOS_ERR;
+    }
+
+    close(fd);
+    return NOS_OK;
+}
+
+/* 异步发送消息：仅负责路由层分发 */
+nos_status_t nos_service_msg_send(nos_service_msg_t *msg) {
+    service_entry_t *entry = find_service_entry(msg->dst_service);
+    
+    if (entry && entry->is_remote) {
+        /* 路由到远端 UDS 传输 */
+        return nos_transport_remote_uds_send(msg, entry->remote_uds_path);
+    }
+
+    /* 默认路由到本地队列传输 */
+    return nos_transport_local_send(msg);
 }
 
 static void process_thread_messages(nos_thread_t *self) {
