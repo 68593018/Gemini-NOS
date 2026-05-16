@@ -1,9 +1,13 @@
+[Buffer] Pool initialized with 256 blocks of 2048 bytes.
 --- [NOS Node: ProcB] Starting ---
 [Node] Loaded Component: Comp-4 (ID: 4)
 [Node] Loaded Component: Comp-5 (ID: 5)
 [Node] Registered Remote Route: Service 101 -> ProcA (/tmp/nos_proc_A.sock)
 [Node] Registered Local Service: 204 (Provider: Comp-4)
 [Scheduler] Thread 'MainWorker' (epoll-driven) loop started.
-[IPC] Received valid msg from FD 7: Service=204, Code=1001, Len=32
-[Comp-4] RECEIVED: From Component 1, MsgCode 1001, Payload: Meta-driven Req
+[IPC] Received msg from FD 7 via BufferPool: Service=204, Len=56
+[Comp-4] RECEIVED: From Component 1, MsgCode 1001, Payload: Buffer-driven Req
+[Comp-4] Auto-replying to Remote Service 101...
+[IPC] Received msg from FD 7 via BufferPool: Service=204, Len=56
+[Comp-4] RECEIVED: From Component 1, MsgCode 1001, Payload: Loop Req #1
 [Comp-4] Auto-replying to Remote Service 101...

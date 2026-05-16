@@ -7,6 +7,7 @@
 #include "nos_service.h"
 #include "nos_scheduler.h"
 #include "nos_manifest.h"
+#include "nos_buffer.h"
 
 /* 外部函数声明 */
 nos_status_t nos_ipc_init(nos_thread_t *thread, const char *uds_path);
@@ -24,6 +25,9 @@ int main(int argc, char *argv[]) {
         printf("Usage: %s <node_name>\n", argv[0]);
         return -1;
     }
+
+    /* 0. 初始化 Buffer 池 */
+    nos_buffer_init_pool();
 
     const char *node_name = argv[1];
     const nos_node_def_t *node_def = nos_manifest_get_node(node_name);
@@ -53,7 +57,6 @@ int main(int argc, char *argv[]) {
     for (uint32_t i = 0; i < svc_count; i++) {
         const nos_service_def_t *svc = &svc_list[i];
         if (strcmp(svc->node_name, node_name) == 0) {
-            /* 本地服务：绑定到对应的本地组件 */
             nos_component_t *provider = nos_get_component_by_id(svc->provider_comp_id);
             if (provider) {
                 nos_service_register_provider(svc->service_id, provider);
@@ -61,7 +64,6 @@ int main(int argc, char *argv[]) {
                        svc->service_id, provider->name);
             }
         } else {
-            /* 远端服务：注册路由 */
             const nos_node_def_t *remote_node = nos_manifest_get_node(svc->node_name);
             if (remote_node) {
                 nos_service_register_remote(svc->service_id, remote_node->uds_path);
@@ -82,17 +84,19 @@ int main(int argc, char *argv[]) {
     if (strcmp(node_name, "ProcA") == 0) {
         sleep(2);
         printf("[Node] ProcA triggering initial test request to Service 204...\n");
-        size_t len = sizeof(nos_service_msg_t) + 32;
-        nos_service_msg_t *msg = malloc(len);
-        msg->magic = NOS_IPC_MAGIC;
-        msg->version = NOS_IPC_VERSION;
-        msg->dst_service = 204;
-        msg->src_component = 1;
-        msg->msg_code = 1001;
-        msg->payload_len = 32;
-        strcpy((char*)msg->payload, "Meta-driven Req");
-        nos_service_msg_send(msg);
-        free(msg);
+        
+        nos_buffer_t *buf = nos_buffer_alloc();
+        if (buf) {
+            nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+            msg->magic = NOS_IPC_MAGIC;
+            msg->version = NOS_IPC_VERSION;
+            msg->dst_service = 204;
+            msg->src_component = 1;
+            msg->msg_code = 1001;
+            msg->payload_len = 32;
+            strcpy((char*)(buf->data + sizeof(nos_service_msg_t)), "Buffer-driven Req");
+            nos_service_msg_send(buf);
+        }
     }
 
     while(1) sleep(10);

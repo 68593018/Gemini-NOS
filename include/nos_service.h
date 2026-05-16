@@ -2,12 +2,14 @@
 #define __NOS_SERVICE_H__
 
 #include "nos_types.h"
+#include "nos_buffer.h"
 
 #define NOS_IPC_MAGIC   0x4E4F  /* "NO" */
 #define NOS_IPC_VERSION 0x01
 
 /**
  * @brief 远程服务消息信封 (Message Envelope)
+ * @note 存放于 nos_buffer_t->data 的开头
  */
 typedef struct nos_service_msg_s {
     uint16_t magic;            /**< 幻数校验 */
@@ -17,7 +19,6 @@ typedef struct nos_service_msg_s {
     uint32_t msg_code;         /**< 业务操作码 */
     uint32_t tx_id;            /**< 事务 ID，用于关联 Req/Rsp */
     uint32_t payload_len;      /**< 载荷长度 */
-    uint8_t  payload[0];       /**< 柔性数组，指向具体的业务数据结构 */
 } nos_service_msg_t;
 
 /**
@@ -31,7 +32,7 @@ typedef struct {
 /**
  * @brief 远程服务 API (由系统总线提供)
  */
-nos_status_t nos_service_msg_send(nos_service_msg_t *msg);
+nos_status_t nos_service_msg_send(nos_buffer_t *buf);
 
 /**
  * @brief 注册远端服务路由信息

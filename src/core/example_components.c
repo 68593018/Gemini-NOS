@@ -4,28 +4,38 @@
 #include <unistd.h>
 #include "nos_component.h"
 #include "nos_service.h"
+#include "nos_buffer.h"
 
 #define MAX_ITERATIONS 10
 
 static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     static int counter = 0;
+    
+    /* 
+     * 在零拷贝架构中，payload 紧跟在 msg 头部后面。
+     * msg 本身指向的是 nos_buffer_t->data。
+     */
+    const char *payload = (const char *)((uint8_t *)msg + sizeof(nos_service_msg_t));
+
     printf("[%s] RECEIVED: From Component %u, MsgCode %u, Payload: %s\n", 
-           self->name, msg->src_component, msg->msg_code, (char*)msg->payload);
+           self->name, msg->src_component, msg->msg_code, payload);
 
     /* 业务逻辑 1：如果是跨进程请求 (1001)，则回包 */
     if (msg->msg_code == 1001) {
         printf("[%s] Auto-replying to Remote Service 101...\n", self->name);
-        size_t len = sizeof(nos_service_msg_t) + 32;
-        nos_service_msg_t *rsp = malloc(len);
-        rsp->magic = NOS_IPC_MAGIC;
-        rsp->version = NOS_IPC_VERSION;
-        rsp->dst_service = 101; 
-        rsp->src_component = self->id;
-        rsp->msg_code = 1002;
-        rsp->payload_len = 32;
-        sprintf((char*)rsp->payload, "Reply #%d from %s", ++counter, self->name);
-        nos_service_msg_send(rsp);
-        free(rsp);
+        
+        nos_buffer_t *buf = nos_buffer_alloc();
+        if (buf) {
+            nos_service_msg_t *rsp = (nos_service_msg_t *)buf->data;
+            rsp->magic = NOS_IPC_MAGIC;
+            rsp->version = NOS_IPC_VERSION;
+            rsp->dst_service = 101; 
+            rsp->src_component = self->id;
+            rsp->msg_code = 1002;
+            rsp->payload_len = 32;
+            sprintf((char*)(buf->data + sizeof(nos_service_msg_t)), "Reply #%d from %s", ++counter, self->name);
+            nos_service_msg_send(buf);
+        }
     }
     
     /* 业务逻辑 2：如果是跨进程响应 (1002)，在限制次数内发起下一次请求 */
@@ -37,17 +47,19 @@ static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) 
         sleep(1); 
         printf("[%s] Initiating next loop request (%d/%d) to Service 204...\n", 
                self->name, counter + 1, MAX_ITERATIONS);
-        size_t len = sizeof(nos_service_msg_t) + 32;
-        nos_service_msg_t *next_req = malloc(len);
-        next_req->magic = NOS_IPC_MAGIC;
-        next_req->version = NOS_IPC_VERSION;
-        next_req->dst_service = 204;
-        next_req->src_component = self->id;
-        next_req->msg_code = 1001;
-        next_req->payload_len = 32;
-        sprintf((char*)next_req->payload, "Loop Req #%d", ++counter);
-        nos_service_msg_send(next_req);
-        free(next_req);
+        
+        nos_buffer_t *buf = nos_buffer_alloc();
+        if (buf) {
+            nos_service_msg_t *next_req = (nos_service_msg_t *)buf->data;
+            next_req->magic = NOS_IPC_MAGIC;
+            next_req->version = NOS_IPC_VERSION;
+            next_req->dst_service = 204;
+            next_req->src_component = self->id;
+            next_req->msg_code = 1001;
+            next_req->payload_len = 32;
+            sprintf((char*)(buf->data + sizeof(nos_service_msg_t)), "Loop Req #%d", ++counter);
+            nos_service_msg_send(buf);
+        }
     }
 }
 

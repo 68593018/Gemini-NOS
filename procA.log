@@ -1,3 +1,4 @@
+[Buffer] Pool initialized with 256 blocks of 2048 bytes.
 --- [NOS Node: ProcA] Starting ---
 [Node] Loaded Component: Comp-1 (ID: 1)
 [Node] Loaded Component: Comp-2 (ID: 2)
@@ -6,5 +7,8 @@
 [Node] Registered Remote Route: Service 204 -> ProcB (/tmp/nos_proc_B.sock)
 [Scheduler] Thread 'MainWorker' (epoll-driven) loop started.
 [Node] ProcA triggering initial test request to Service 204...
-[IPC] Received valid msg from FD 8: Service=101, Code=1002, Len=32
+[IPC] Received msg from FD 8 via BufferPool: Service=101, Len=56
 [Comp-1] RECEIVED: From Component 4, MsgCode 1002, Payload: Reply #1 from Comp-4
+[Comp-1] Initiating next loop request (1/10) to Service 204...
+[IPC] Received msg from FD 8 via BufferPool: Service=101, Len=56
+[Comp-1] RECEIVED: From Component 4, MsgCode 1002, Payload: Reply #2 from Comp-4

@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include "nos_component.h"
+#include "nos_buffer.h"
 
 /**
  * @brief 文件描述符事件回调
@@ -26,7 +27,7 @@ typedef struct nos_thread_s {
     int notify_fd[2];           /**< 唤醒管道 (0:read, 1:write) */
     
     pthread_mutex_t queue_lock; /**< 队列锁 */
-    struct nos_service_msg_s **msg_queue;
+    nos_buffer_t **msg_queue;
     int head, tail;
 
     nos_component_t **components;

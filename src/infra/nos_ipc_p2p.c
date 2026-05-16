@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include "nos_scheduler.h"
 #include "nos_service.h"
+#include "nos_buffer.h"
 
 /**
  * @brief 处理已建立连接的 Socket 数据读取
@@ -26,43 +27,49 @@ static void nos_ipc_data_handler(int client_fd, void *arg) {
     }
 
     if (ret < (ssize_t)sizeof(header)) {
-        printf("[IPC] Partial header received, protocol out of sync. Closing.\n");
+        printf("[IPC] Partial header received. Protocol out of sync.\n");
         goto err_close;
     }
 
     /* 2. 幻数与版本强校验 */
     if (header.magic != NOS_IPC_MAGIC) {
-        printf("[IPC] Protocol error: Invalid magic 0x%04X from FD %d. Dropping.\n", 
-               header.magic, client_fd);
+        printf("[IPC] Protocol error: Invalid magic 0x%04X. Dropping.\n", header.magic);
         goto err_close;
     }
 
-    if (header.version != NOS_IPC_VERSION) {
-        printf("[IPC] Protocol error: Version mismatch (%u != %u).\n", 
-               header.version, NOS_IPC_VERSION);
+    /* 3. 申请 Buffer 池内存并读取 Payload */
+    nos_buffer_t *buf = nos_buffer_alloc();
+    if (!buf) {
+        printf("[IPC] Buffer Pool empty! Dropping message.\n");
         goto err_close;
     }
 
-    /* 3. 分配内存并读取 Payload */
-    size_t full_len = sizeof(nos_service_msg_t) + header.payload_len;
-    nos_service_msg_t *msg = malloc(full_len);
-    memcpy(msg, &header, sizeof(header));
+    /* 将已读取的 Header 考入 Buffer */
+    memcpy(buf->data, &header, sizeof(header));
+    buf->len = sizeof(header);
 
     if (header.payload_len > 0) {
-        ret = recv(client_fd, msg->payload, header.payload_len, MSG_WAITALL);
+        /* 读取剩余 Payload 直接存入 Buffer 数据区 */
+        ret = recv(client_fd, buf->data + sizeof(header), header.payload_len, MSG_WAITALL);
         if (ret < (ssize_t)header.payload_len) {
             printf("[IPC] Failed to read complete payload.\n");
-            free(msg);
+            nos_buffer_release(buf);
             goto err_close;
         }
+        buf->len += ret;
     }
 
-    printf("[IPC] Received valid msg from FD %d: Service=%u, Code=%u, Len=%u\n", 
-           client_fd, msg->dst_service, msg->msg_code, msg->payload_len);
+    printf("[IPC] Received msg from FD %d via BufferPool: Service=%u, Len=%u\n", 
+           client_fd, header.dst_service, buf->len);
 
-    /* 4. 注入本地调度器 */
-    nos_service_msg_send(msg); 
-    free(msg);
+    /* 4. 注入本地调度器 (所有权转移) */
+    nos_service_msg_send(buf); 
+    
+    /* 
+     * 注意：nos_service_msg_send 内部会调用 retain，
+     * 但本函数作为“生产者”申请的 Buffer，使命已完成，应调用一次 release。
+     */
+    nos_buffer_release(buf);
     return;
 
 err_close:

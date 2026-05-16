@@ -4,6 +4,7 @@ LDFLAGS = -lpthread
 
 SRCS = src/core/nos_scheduler.c \
        src/core/nos_manifest.c \
+       src/core/nos_buffer.c \
        src/core/example_components.c \
        src/infra/nos_ipc_p2p.c \
        src/core/nos_node_main.c
