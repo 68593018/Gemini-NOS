@@ -1,7 +1,6 @@
 import sys
 import os
 
-# 尝试导入 yaml
 try:
     import yaml
     USE_PYYAML = True
@@ -9,13 +8,11 @@ except ImportError:
     USE_PYYAML = False
 
 def parse_yaml_fallback(file_path):
-    # 增强版 fallback 解析器，支持从片段中提取 nodes 和 services
     data = {"nodes": [], "services": []}
     current_node = None
     current_thread = None
     
     if not os.path.exists(file_path): return data
-
     with open(file_path, 'r') as f:
         lines = f.readlines()
         
@@ -23,7 +20,6 @@ def parse_yaml_fallback(file_path):
     for line in lines:
         line = line.rstrip()
         if not line or line.lstrip().startswith('#'): continue
-        
         indent = len(line) - len(line.lstrip())
         content = line.strip()
         
@@ -42,7 +38,7 @@ def parse_yaml_fallback(file_path):
                 current_node["uds_path"] = content.split(":")[1].strip().strip('"')
             elif content == "threads:":
                 pass
-            elif content.startswith("- name:") and indent > 4: # 线程级 name
+            elif content.startswith("- name:") and indent > 4:
                 current_thread = {"name": content.split(":")[1].strip().strip('"'), "components": []}
                 current_node["threads"].append(current_thread)
             elif "components:" in content:
@@ -52,8 +48,6 @@ def parse_yaml_fallback(file_path):
         elif mode == "services":
             if content.startswith("- id:"):
                 data["services"].append({"id": int(content.split(":")[1].strip())})
-            elif "node:" in content:
-                data["services"][-1]["node"] = content.split(":")[1].strip().strip('"')
             elif "provider:" in content:
                 data["services"][-1]["provider"] = int(content.split(":")[1].strip())
                 
@@ -65,20 +59,33 @@ def merge_config(base, new):
     if "services" in new and new["services"]:
         base["services"].extend(new["services"])
 
-def validate_config(data):
+def validate_and_resolve(data):
     # 1. 检查 Node 名唯一性
     node_names = [n["name"] for n in data["nodes"]]
     if len(node_names) != len(set(node_names)):
-        print("Error: Duplicate Node names found in configuration!")
+        print("Error: Duplicate Node names found!")
         sys.exit(1)
         
-    # 2. 检查 Service ID 唯一性
-    svc_ids = [s["id"] for s in data["services"]]
-    if len(svc_ids) != len(set(svc_ids)):
-        print("Error: Duplicate Service IDs found in configuration!")
-        sys.exit(1)
+    # 2. 建立 组件 ID -> 节点名 的映射
+    comp_to_node = {}
+    for node in data["nodes"]:
+        for thread in node["threads"]:
+            for comp_id in thread["components"]:
+                if comp_id in comp_to_node:
+                    print(f"Error: Component {comp_id} is deployed to multiple nodes!")
+                    sys.exit(1)
+                comp_to_node[comp_id] = node["name"]
+    
+    # 3. 自动推导服务所在的 Node
+    for svc in data["services"]:
+        provider_id = svc.get("provider")
+        if provider_id in comp_to_node:
+            svc["node"] = comp_to_node[provider_id]
+        else:
+            print(f"Error: Service {svc['id']} provider component {provider_id} not found in any Node deployment!")
+            sys.exit(1)
 
-    print(f"Validation Passed: {len(data['nodes'])} Nodes, {len(data['services'])} Services merged.")
+    print(f"Resolution Successful: {len(data['nodes'])} Nodes, {len(data['services'])} Services resolved.")
 
 def generate_c_code(data, output_path):
     c_content = [
@@ -87,7 +94,6 @@ def generate_c_code(data, output_path):
         '',
         'static const nos_node_def_t g_nodes[] = {'
     ]
-    
     for node in data["nodes"]:
         c_content.append('    {')
         c_content.append(f'        .name = "{node["name"]}",')
@@ -99,7 +105,6 @@ def generate_c_code(data, output_path):
         c_content.append('            { .name = NULL }')
         c_content.append('        }')
         c_content.append('    },')
-    
     c_content.append('};')
     c_content.append('')
     c_content.append('static const nos_service_def_t g_services[] = {')
@@ -127,13 +132,9 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python3 gen_manifest.py <input_dir> <output.c>")
         sys.exit(1)
-        
     input_dir = sys.argv[1]
     output_path = sys.argv[2]
-    
     master_data = {"nodes": [], "services": []}
-    
-    # 递归遍历目录扫描所有 YAML 文件
     for root, dirs, files in os.walk(input_dir):
         for file in files:
             if file.endswith(".yaml") or file.endswith(".yml"):
@@ -143,9 +144,7 @@ if __name__ == "__main__":
                         file_data = yaml.safe_load(f)
                 else:
                     file_data = parse_yaml_fallback(full_path)
-                
                 if file_data:
                     merge_config(master_data, file_data)
-                    
-    validate_config(master_data)
+    validate_and_resolve(master_data)
     generate_c_code(master_data, output_path)
