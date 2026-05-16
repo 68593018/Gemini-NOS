@@ -1,15 +1,8 @@
 [Buffer] Pool initialized with 256 blocks of 2048 bytes.
 --- [NOS Node: ProcB] Master-Worker Architecture Starting ---
 [Node] DataPlane: Loaded Comp-4 onto Worker-1
-[Node] DataPlane: Loaded Comp-5 onto Worker-1
 [Node] Routing: Remote Service 101 -> ProcA
 [Node] Routing: Service 204 -> Comp-4 (on Worker-1)
 [Node] ControlPlane: IPC Listening on /tmp/nos_proc_B.sock
-[Scheduler] Thread 'Mgmt-Master' (TID: 140589607679680) loop started.
-[Scheduler] Thread 'Worker-1' (TID: 140589599286976) loop started.
-[IPC] Received msg from FD 10 via BufferPool: Service=204, Len=56
-[Comp-4] RECEIVED: From Component 1, MsgCode 1001, Payload: Master-Worker Message
-[Comp-4] Auto-replying to Remote Service 101...
-[IPC] Received msg from FD 10 via BufferPool: Service=204, Len=56
-[Comp-4] RECEIVED: From Component 1, MsgCode 1001, Payload: Loop Req #1
-[Comp-4] Auto-replying to Remote Service 101...
+[Scheduler] Thread 'Worker-1' (TID: 140579409225408) loop started.
+[Scheduler] Thread 'Mgmt-Master' (TID: 140579417618112) loop started.

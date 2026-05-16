@@ -1,6 +1,8 @@
 CC = gcc
 CFLAGS = -Iinclude -Wall
 LDFLAGS = -lpthread
+PYTHON = python3
+GEN_SCRIPT = scripts/gen_manifest.py
 
 SRCS = src/core/nos_scheduler.c \
        src/core/nos_manifest.c \
@@ -11,10 +13,14 @@ SRCS = src/core/nos_scheduler.c \
 
 TARGET = nos_node
 
-all: $(TARGET)
+all: src/core/nos_manifest.c $(TARGET)
+
+src/core/nos_manifest.c: deploy.yaml $(GEN_SCRIPT)
+	@echo "Generating manifest source from YAML..."
+	$(PYTHON) $(GEN_SCRIPT) deploy.yaml src/core/nos_manifest.c
 
 $(TARGET): $(SRCS)
 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET) $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET) procA procB nos_epoll_demo nos_demo nos_async_demo
+	rm -f $(TARGET) src/core/nos_manifest.c procA.log procB.log
