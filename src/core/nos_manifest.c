@@ -6,8 +6,8 @@ static const nos_node_def_t g_nodes[] = {
         .name = "ProcA",
         .uds_path = "/tmp/nos_proc_A.sock",
         .threads = {
-            { .name = "Thread-0", .comp_ids = {1, 0} },    /* Comp-1 在线程 0 */
-            { .name = "Thread-1", .comp_ids = {2, 3, 0} }, /* Comp-2, 3 在线程 1 */
+            { .name = "Worker-1", .comp_ids = {1, 0} },    /* Comp-1 在工作线程 1 */
+            { .name = "Worker-2", .comp_ids = {2, 3, 0} }, /* Comp-2, 3 在工作线程 2 */
             { .name = NULL }
         }
     },
@@ -15,7 +15,7 @@ static const nos_node_def_t g_nodes[] = {
         .name = "ProcB",
         .uds_path = "/tmp/nos_proc_B.sock",
         .threads = {
-            { .name = "Thread-0", .comp_ids = {4, 5, 0} }, /* Comp-4, 5 在线程 0 */
+            { .name = "Worker-1", .comp_ids = {4, 5, 0} }, /* Comp-4, 5 在工作线程 1 */
             { .name = NULL }
         }
     }

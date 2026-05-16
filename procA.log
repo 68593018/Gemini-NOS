@@ -1,15 +1,17 @@
 [Buffer] Pool initialized with 256 blocks of 2048 bytes.
---- [NOS Node: ProcA] Multi-threaded Starting ---
-[Node] Loaded Comp-1 onto Thread-0
-[Node] Loaded Comp-2 onto Thread-1
-[Node] Loaded Comp-3 onto Thread-1
-[Node] Registered Local Service: 101 -> Comp-1 (on Thread-0)
-[Node] Registered Remote Route: Service 204 -> ProcB
-[Scheduler] Thread 'Thread-0' (TID: 140154266187456) loop started.
-[Scheduler] Thread 'Thread-1' (TID: 140154257794752) loop started.
-[Node] ProcA triggering cross-thread interaction...
-[IPC] Received msg from FD 11 via BufferPool: Service=101, Len=56
+--- [NOS Node: ProcA] Master-Worker Architecture Starting ---
+[Node] DataPlane: Loaded Comp-1 onto Worker-1
+[Node] DataPlane: Loaded Comp-2 onto Worker-2
+[Node] DataPlane: Loaded Comp-3 onto Worker-2
+[Node] Routing: Service 101 -> Comp-1 (on Worker-1)
+[Node] Routing: Remote Service 204 -> ProcB
+[Node] ControlPlane: IPC Listening on /tmp/nos_proc_A.sock
+[Scheduler] Thread 'Mgmt-Master' (TID: 140410129217216) loop started.
+[Scheduler] Thread 'Worker-1' (TID: 140410120824512) loop started.
+[Scheduler] Thread 'Worker-2' (TID: 140410112431808) loop started.
+[Node] ProcA triggering Master-Worker initial test...
+[IPC] Received msg from FD 14 via BufferPool: Service=101, Len=56
 [Comp-1] RECEIVED: From Component 4, MsgCode 1002, Payload: Reply #1 from Comp-4
 [Comp-1] Initiating next loop request (1/10) to Service 204...
-[IPC] Received msg from FD 11 via BufferPool: Service=101, Len=56
+[IPC] Received msg from FD 14 via BufferPool: Service=101, Len=56
 [Comp-1] RECEIVED: From Component 4, MsgCode 1002, Payload: Reply #2 from Comp-4

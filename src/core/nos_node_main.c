@@ -36,91 +36,97 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    printf("--- [NOS Node: %s] Multi-threaded Starting ---\n", node_name);
+    printf("--- [NOS Node: %s] Master-Worker Architecture Starting ---\n", node_name);
 
-    /* 1. 初始化并启动清单定义的线程 */
-    nos_thread_t *threads = malloc(sizeof(nos_thread_t) * 8);
-    int thread_count = 0;
+    /* 1. 【控制面】初始化专属管理线程 (Master) */
+    nos_thread_t *mgmt_thread = malloc(sizeof(nos_thread_t));
+    nos_scheduler_init_thread(mgmt_thread, 999, "Mgmt-Master");
+
+    /* 2. 【数据面】根据清单初始化并启动工作线程池 (Workers) */
+    nos_thread_t *worker_threads = malloc(sizeof(nos_thread_t) * 8);
+    int worker_count = 0;
 
     for (int i = 0; node_def->threads[i].name != NULL; i++) {
         const nos_thread_def_t *t_def = &node_def->threads[i];
-        nos_scheduler_init_thread(&threads[i], i, t_def->name);
+        nos_scheduler_init_thread(&worker_threads[i], i, t_def->name);
         
-        /* 加载挂载到该线程的组件 */
+        /* 将组件加载到具体的工作线程 */
         for (int j = 0; t_def->comp_ids[j] != 0; j++) {
             nos_component_t *comp = nos_get_component_by_id(t_def->comp_ids[j]);
             if (comp) {
-                nos_scheduler_register_component(&threads[i], comp);
-                printf("[Node] Loaded %s onto %s\n", comp->name, t_def->name);
+                nos_scheduler_register_component(&worker_threads[i], comp);
+                printf("[Node] DataPlane: Loaded %s onto %s\n", comp->name, t_def->name);
             }
         }
-        thread_count++;
+        worker_count++;
     }
 
-    /* 2. 自动化路由注册 (带线程绑定) */
+    /* 3. 自动化路由注册 (Master 与 Workers 联动) */
     uint32_t svc_count = 0;
     const nos_service_def_t *svc_list = nos_manifest_get_services(&svc_count);
     for (uint32_t i = 0; i < svc_count; i++) {
         const nos_service_def_t *svc = &svc_list[i];
         if (strcmp(svc->node_name, node_name) == 0) {
-            /* 本地服务：需要找到对应的线程 */
+            /* 本地服务：确定该组件位于哪个 Worker 线程 */
             nos_component_t *provider = nos_get_component_by_id(svc->provider_comp_id);
-            nos_thread_t *target_t = NULL;
-            // 查表确认组件在哪个线程
-            for (int t = 0; t < thread_count; t++) {
-                for (uint32_t c = 0; c < threads[t].component_count; c++) {
-                    if (threads[t].components[c]->id == svc->provider_comp_id) {
-                        target_t = &threads[t];
+            nos_thread_t *owner_worker = NULL;
+            for (int t = 0; t < worker_count; t++) {
+                for (uint32_t c = 0; c < worker_threads[t].component_count; c++) {
+                    if (worker_threads[t].components[c]->id == svc->provider_comp_id) {
+                        owner_worker = &worker_threads[t];
                         break;
                     }
                 }
-                if (target_t) break;
+                if (owner_worker) break;
             }
-            if (provider && target_t) {
-                nos_service_register_provider_bind(svc->service_id, provider, target_t);
-                printf("[Node] Registered Local Service: %u -> %s (on %s)\n", 
-                       svc->service_id, provider->name, target_t->name);
+            if (provider && owner_worker) {
+                nos_service_register_provider_bind(svc->service_id, provider, owner_worker);
+                printf("[Node] Routing: Service %u -> %s (on %s)\n", 
+                       svc->service_id, provider->name, owner_worker->name);
             }
         } else {
             /* 远端服务注册路由 */
             const nos_node_def_t *remote_node = nos_manifest_get_node(svc->node_name);
             if (remote_node) {
                 nos_service_register_remote(svc->service_id, remote_node->uds_path);
-                printf("[Node] Registered Remote Route: Service %u -> %s\n", 
+                printf("[Node] Routing: Remote Service %u -> %s\n", 
                        svc->service_id, remote_node->name);
             }
         }
     }
 
-    /* 3. 初始化 IPC 监听 (默认挂在 0 号线程) */
-    nos_ipc_init(&threads[0], node_def->uds_path);
+    /* 4. 将 IPC 监听强绑定到管理线程 (控制面接收 IO) */
+    nos_ipc_init(mgmt_thread, node_def->uds_path);
+    printf("[Node] ControlPlane: IPC Listening on %s\n", node_def->uds_path);
 
-    /* 4. 真正启动所有线程 */
-    pthread_t tids[8];
-    for (int i = 0; i < thread_count; i++) {
-        pthread_create(&tids[i], NULL, scheduler_thread_entry, &threads[i]);
+    /* 5. 启动所有物理线程 */
+    pthread_t mgmt_tid;
+    pthread_create(&mgmt_tid, NULL, scheduler_thread_entry, mgmt_thread);
+
+    pthread_t worker_tids[8];
+    for (int i = 0; i < worker_count; i++) {
+        pthread_create(&worker_tids[i], NULL, scheduler_thread_entry, &worker_threads[i]);
     }
 
-    /* 5. 特殊逻辑：触发交互 */
+    /* 6. 模拟业务触发 (测试用) */
     if (strcmp(node_name, "ProcA") == 0) {
         sleep(2);
-        printf("[Node] ProcA triggering cross-thread interaction...\n");
+        printf("[Node] ProcA triggering Master-Worker initial test...\n");
         nos_buffer_t *buf = nos_buffer_alloc();
         if (buf) {
             nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
             msg->magic = NOS_IPC_MAGIC;
             msg->version = NOS_IPC_VERSION;
-            msg->dst_service = 204; /* 远端请求 */
+            msg->dst_service = 204;
             msg->src_component = 1;
             msg->msg_code = 1001;
             msg->payload_len = 32;
-            strcpy((char*)(buf->data + sizeof(nos_service_msg_t)), "Multi-thread Req");
+            strcpy((char*)(buf->data + sizeof(nos_service_msg_t)), "Master-Worker Message");
             nos_service_msg_send(buf);
         }
     }
 
-    for (int i = 0; i < thread_count; i++) {
-        pthread_join(tids[i], NULL);
-    }
+    pthread_join(mgmt_tid, NULL);
+    for (int i = 0; i < worker_count; i++) pthread_join(worker_tids[i], NULL);
     return 0;
 }
