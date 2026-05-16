@@ -17,6 +17,8 @@ static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) 
         printf("[%s] Auto-replying to Remote Service 101...\n", self->name);
         size_t len = sizeof(nos_service_msg_t) + 32;
         nos_service_msg_t *rsp = malloc(len);
+        rsp->magic = NOS_IPC_MAGIC;
+        rsp->version = NOS_IPC_VERSION;
         rsp->dst_service = 101; 
         rsp->src_component = self->id;
         rsp->msg_code = 1002;
@@ -37,6 +39,8 @@ static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) 
                self->name, counter + 1, MAX_ITERATIONS);
         size_t len = sizeof(nos_service_msg_t) + 32;
         nos_service_msg_t *next_req = malloc(len);
+        next_req->magic = NOS_IPC_MAGIC;
+        next_req->version = NOS_IPC_VERSION;
         next_req->dst_service = 204;
         next_req->src_component = self->id;
         next_req->msg_code = 1001;

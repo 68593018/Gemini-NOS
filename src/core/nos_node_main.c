@@ -84,6 +84,8 @@ int main(int argc, char *argv[]) {
         printf("[Node] ProcA triggering initial test request to Service 204...\n");
         size_t len = sizeof(nos_service_msg_t) + 32;
         nos_service_msg_t *msg = malloc(len);
+        msg->magic = NOS_IPC_MAGIC;
+        msg->version = NOS_IPC_VERSION;
         msg->dst_service = 204;
         msg->src_component = 1;
         msg->msg_code = 1001;

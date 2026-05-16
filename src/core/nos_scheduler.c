@@ -187,14 +187,24 @@ static int get_or_create_uds_conn(const char *uds_path) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return -1;
 
+    /* 设置非阻塞 */
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, uds_path, sizeof(addr.sun_path) - 1);
 
+    /* 
+     * 非阻塞 connect 在 UDS 下通常立即成功或失败。
+     * 若返回 EINPROGRESS，简化版暂不处理，直接认为失败。
+     */
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return -1;
+        if (errno != EINPROGRESS) {
+            close(fd);
+            return -1;
+        }
     }
 
     /* 3. 存入缓存 */
@@ -206,7 +216,7 @@ static int get_or_create_uds_conn(const char *uds_path) {
     return fd;
 }
 
-/* 远端传输：通过 UDS 发送 (长连接 + 自动重连) */
+/* 远端传输：通过 UDS 发送 (长连接 + 自动重连 + 非阻塞保护) */
 static nos_status_t nos_transport_remote_uds_send(nos_service_msg_t *msg, const char *uds_path) {
     int retry = 1;
     size_t full_len = sizeof(nos_service_msg_t) + msg->payload_len;
@@ -221,16 +231,23 @@ static nos_status_t nos_transport_remote_uds_send(nos_service_msg_t *msg, const 
             return NOS_OK;
         }
 
-        /* 发送失败：可能是对端重启，连接已失效 */
-        printf("[Transport] Connection to %s failed (sent:%ld, err:%s). Retrying...\n", 
-               uds_path, sent, strerror(errno));
+        /* 处理非阻塞写满情况 */
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            printf("[Transport] Outbound buffer full for %s. Dropping msg.\n", uds_path);
+            return NOS_ERR_BUSY;
+        }
+
+        /* 发送失败：可能是对端重启，连接已失效 (EPIPE, ECONNRESET) */
+        printf("[Transport] Connection to %s failed (err:%s). Cleaning up pool and retrying...\n", 
+               uds_path, strerror(errno));
         
         // 清理缓存中的失效 FD
         for (uint32_t i = 0; i < g_uds_conn_count; i++) {
             if (strcmp(g_uds_conn_pool[i].uds_path, uds_path) == 0) {
                 close(g_uds_conn_pool[i].fd);
-                // 简单的从池中移除：将最后一项移过来
-                g_uds_conn_pool[i] = g_uds_conn_pool[g_uds_conn_count - 1];
+                if (i != g_uds_conn_count - 1) {
+                    g_uds_conn_pool[i] = g_uds_conn_pool[g_uds_conn_count - 1];
+                }
                 g_uds_conn_count--;
                 break;
             }

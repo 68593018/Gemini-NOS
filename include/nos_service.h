@@ -3,10 +3,15 @@
 
 #include "nos_types.h"
 
+#define NOS_IPC_MAGIC   0x4E4F  /* "NO" */
+#define NOS_IPC_VERSION 0x01
+
 /**
  * @brief 远程服务消息信封 (Message Envelope)
  */
 typedef struct nos_service_msg_s {
+    uint16_t magic;            /**< 幻数校验 */
+    uint16_t version;          /**< 协议版本 */
     uint32_t dst_service;      /**< 目标服务 ID */
     uint32_t src_component;    /**< 发送者组件 ID */
     uint32_t msg_code;         /**< 业务操作码 */
