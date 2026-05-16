@@ -3,8 +3,7 @@
 
 static const nos_node_def_t g_nodes[] = {
     {
-        .name = "ProcA",
-        .uds_path = "/tmp/nos_proc_A.sock",
+        .name = "ProcA", .uds_path = "/tmp/nos_proc_A.sock",
         .threads = {
             { .name = "Worker-1", .comp_ids = {1, 0} },
             { .name = "Worker-2", .comp_ids = {2, 3, 5, 0} },
@@ -12,28 +11,21 @@ static const nos_node_def_t g_nodes[] = {
         }
     },
     {
-        .name = "ProcB",
-        .uds_path = "/tmp/nos_proc_B.sock",
+        .name = "ProcB", .uds_path = "/tmp/nos_proc_B.sock",
         .threads = {
             { .name = "Worker-1", .comp_ids = {4, 0} },
             { .name = NULL }
         }
     },
 };
-
 static const nos_service_def_t g_services[] = {
     { .service_id = 101, .node_name = "ProcA", .provider_comp_id = 1 },
     { .service_id = 204, .node_name = "ProcB", .provider_comp_id = 4 },
 };
 
-const nos_node_def_t* nos_manifest_get_node(const char *node_name) {
-    for (size_t i = 0; i < sizeof(g_nodes)/sizeof(g_nodes[0]); i++) {
-        if (strcmp(g_nodes[i].name, node_name) == 0) return &g_nodes[i];
-    }
+const nos_node_def_t* nos_manifest_get_node(const char *n) {
+    for (size_t i=0; i<sizeof(g_nodes)/sizeof(g_nodes[0]); i++) if(strcmp(g_nodes[i].name, n)==0) return &g_nodes[i];
     return NULL;
 }
 
-const nos_service_def_t* nos_manifest_get_services(uint32_t *count) {
-    *count = sizeof(g_services) / sizeof(g_services[0]);
-    return g_services;
-}
+const nos_service_def_t* nos_manifest_get_services(uint32_t *c) { *c = sizeof(g_services)/sizeof(g_services[0]); return g_services; }

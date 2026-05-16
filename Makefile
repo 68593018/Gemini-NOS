@@ -18,11 +18,11 @@ TARGET = nos_node
 all: src/core/nos_manifest.c $(TARGET)
 
 src/core/nos_manifest.c: $(CONFIG_FILES) $(GEN_SCRIPT)
-	@echo "Generating manifest source from config directory..."
-	$(PYTHON) $(GEN_SCRIPT) $(CONFIG_DIR) src/core/nos_manifest.c
+	@echo "Generating manifest and ID headers from config..."
+	$(PYTHON) $(GEN_SCRIPT) $(CONFIG_DIR) src/core/nos_manifest.c include/nos_ids.h
 
 $(TARGET): $(SRCS)
 	$(CC) $(CFLAGS) $(SRCS) -o $(TARGET) $(LDFLAGS)
 
 clean:
-	rm -f $(TARGET) src/core/nos_manifest.c procA.log procB.log
+	rm -f $(TARGET) src/core/nos_manifest.c include/nos_ids.h procA.log procB.log
