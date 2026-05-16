@@ -48,6 +48,11 @@ typedef struct nos_thread_s {
 nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg);
 
 /**
+ * @brief 从调度器移除监听的文件描述符
+ */
+nos_status_t nos_scheduler_remove_fd(nos_thread_t *thread, int fd);
+
+/**
  * @brief 向系统注册一个服务提供者
  */
 nos_status_t nos_service_register_provider(uint32_t service_id, nos_component_t *provider);

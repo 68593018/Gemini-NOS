@@ -117,6 +117,28 @@ nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_
     return NOS_OK;
 }
 
+nos_status_t nos_scheduler_remove_fd(nos_thread_t *thread, int fd) {
+    /* 1. 从 epoll 中注销 */
+    if (epoll_ctl(thread->epoll_fd, EPOLL_CTL_DEL, fd, NULL) < 0) {
+        if (errno != ENOENT) {
+            perror("epoll_ctl_del");
+        }
+    }
+
+    /* 2. 从注册表中清理 */
+    for (uint32_t i = 0; i < thread->fd_count; i++) {
+        if (thread->fd_entries[i].fd == fd) {
+            // 简单逻辑：将最后一项移到此处覆盖，并减少计数
+            if (i != thread->fd_count - 1) {
+                thread->fd_entries[i] = thread->fd_entries[thread->fd_count - 1];
+            }
+            thread->fd_count--;
+            return NOS_OK;
+        }
+    }
+    return NOS_ERR;
+}
+
 /* 本地传输：消息入队并唤醒 */
 static nos_status_t nos_transport_local_send(nos_service_msg_t *msg) {
     nos_thread_t *target_thread = g_main_thread_ptr; // 演示版固定主线程
@@ -143,10 +165,27 @@ static nos_status_t nos_transport_local_send(nos_service_msg_t *msg) {
     return NOS_OK;
 }
 
-/* 远端传输：通过 UDS 发送 */
-static nos_status_t nos_transport_remote_uds_send(nos_service_msg_t *msg, const char *uds_path) {
+/* 出站连接池项 */
+typedef struct {
+    char uds_path[108];
+    int fd;
+} nos_uds_conn_t;
+
+static nos_uds_conn_t g_uds_conn_pool[16]; // 简单缓存 16 个远端节点
+static uint32_t g_uds_conn_count = 0;
+
+/* 获取或建立连接 */
+static int get_or_create_uds_conn(const char *uds_path) {
+    /* 1. 查找现有缓存 */
+    for (uint32_t i = 0; i < g_uds_conn_count; i++) {
+        if (strcmp(g_uds_conn_pool[i].uds_path, uds_path) == 0) {
+            return g_uds_conn_pool[i].fd;
+        }
+    }
+
+    /* 2. 新建连接 */
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return NOS_ERR;
+    if (fd < 0) return -1;
 
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
@@ -155,17 +194,51 @@ static nos_status_t nos_transport_remote_uds_send(nos_service_msg_t *msg, const 
 
     if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(fd);
-        return NOS_ERR;
+        return -1;
     }
 
+    /* 3. 存入缓存 */
+    if (g_uds_conn_count < 16) {
+        strncpy(g_uds_conn_pool[g_uds_conn_count].uds_path, uds_path, 107);
+        g_uds_conn_pool[g_uds_conn_count].fd = fd;
+        g_uds_conn_count++;
+    }
+    return fd;
+}
+
+/* 远端传输：通过 UDS 发送 (长连接 + 自动重连) */
+static nos_status_t nos_transport_remote_uds_send(nos_service_msg_t *msg, const char *uds_path) {
+    int retry = 1;
     size_t full_len = sizeof(nos_service_msg_t) + msg->payload_len;
-    if (write(fd, msg, full_len) < (ssize_t)full_len) {
-        close(fd);
-        return NOS_ERR;
+
+    while (retry >= 0) {
+        int fd = get_or_create_uds_conn(uds_path);
+        if (fd < 0) return NOS_ERR;
+
+        /* 使用 MSG_NOSIGNAL 避免对端关闭导致本进程 SIGPIPE 退出 */
+        ssize_t sent = send(fd, msg, full_len, MSG_NOSIGNAL);
+        if (sent == (ssize_t)full_len) {
+            return NOS_OK;
+        }
+
+        /* 发送失败：可能是对端重启，连接已失效 */
+        printf("[Transport] Connection to %s failed (sent:%ld, err:%s). Retrying...\n", 
+               uds_path, sent, strerror(errno));
+        
+        // 清理缓存中的失效 FD
+        for (uint32_t i = 0; i < g_uds_conn_count; i++) {
+            if (strcmp(g_uds_conn_pool[i].uds_path, uds_path) == 0) {
+                close(g_uds_conn_pool[i].fd);
+                // 简单的从池中移除：将最后一项移过来
+                g_uds_conn_pool[i] = g_uds_conn_pool[g_uds_conn_count - 1];
+                g_uds_conn_count--;
+                break;
+            }
+        }
+        retry--;
     }
 
-    close(fd);
-    return NOS_OK;
+    return NOS_ERR;
 }
 
 /* 异步发送消息：仅负责路由层分发 */

@@ -1,14 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "nos_component.h"
 #include "nos_service.h"
 
+#define MAX_ITERATIONS 10
+
 static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
+    static int counter = 0;
     printf("[%s] RECEIVED: From Component %u, MsgCode %u, Payload: %s\n", 
            self->name, msg->src_component, msg->msg_code, (char*)msg->payload);
 
-    /* 业务逻辑：如果是跨进程请求 (1001)，则回包 */
+    /* 业务逻辑 1：如果是跨进程请求 (1001)，则回包 */
     if (msg->msg_code == 1001) {
         printf("[%s] Auto-replying to Remote Service 101...\n", self->name);
         size_t len = sizeof(nos_service_msg_t) + 32;
@@ -17,9 +21,29 @@ static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) 
         rsp->src_component = self->id;
         rsp->msg_code = 1002;
         rsp->payload_len = 32;
-        sprintf((char*)rsp->payload, "Reply from %s", self->name);
+        sprintf((char*)rsp->payload, "Reply #%d from %s", ++counter, self->name);
         nos_service_msg_send(rsp);
         free(rsp);
+    }
+    
+    /* 业务逻辑 2：如果是跨进程响应 (1002)，在限制次数内发起下一次请求 */
+    if (msg->msg_code == 1002) {
+        if (counter >= MAX_ITERATIONS) {
+            printf("[%s] Reached MAX_ITERATIONS (%d). Stopping loop.\n", self->name, MAX_ITERATIONS);
+            return;
+        }
+        sleep(1); 
+        printf("[%s] Initiating next loop request (%d/%d) to Service 204...\n", 
+               self->name, counter + 1, MAX_ITERATIONS);
+        size_t len = sizeof(nos_service_msg_t) + 32;
+        nos_service_msg_t *next_req = malloc(len);
+        next_req->dst_service = 204;
+        next_req->src_component = self->id;
+        next_req->msg_code = 1001;
+        next_req->payload_len = 32;
+        sprintf((char*)next_req->payload, "Loop Req #%d", ++counter);
+        nos_service_msg_send(next_req);
+        free(next_req);
     }
 }
 

@@ -12,12 +12,15 @@
  * @brief 处理已建立连接的 Socket 数据读取
  */
 static void nos_ipc_data_handler(int client_fd, void *arg) {
+    nos_thread_t *thread = (nos_thread_t *)arg;
     nos_service_msg_t header;
+    
+    // 使用 MSG_PEEK 预读头部以确定长度
     ssize_t ret = recv(client_fd, &header, sizeof(header), MSG_PEEK);
     if (ret <= 0) {
-        if (ret == 0) printf("[IPC] Remote closed connection.\n");
+        if (ret == 0) printf("[IPC] Remote closed connection (FD:%d).\n", client_fd);
+        nos_scheduler_remove_fd(thread, client_fd);
         close(client_fd);
-        // 注意：这里需要从 epoll 中移除，演示版暂不处理 FD 移除逻辑
         return;
     }
 
@@ -25,20 +28,21 @@ static void nos_ipc_data_handler(int client_fd, void *arg) {
     size_t full_len = sizeof(nos_service_msg_t) + header.payload_len;
     nos_service_msg_t *msg = malloc(full_len);
     ret = recv(client_fd, msg, full_len, MSG_WAITALL);
-    if (ret < (ssize_t)full_len) {
+    if (ret <= 0) {
         free(msg);
+        nos_scheduler_remove_fd(thread, client_fd);
         close(client_fd);
         return;
     }
 
-    printf("[IPC] Received cross-process msg: Service=%u, Code=%u\n", 
-           msg->dst_service, msg->msg_code);
+    printf("[IPC] Received cross-process msg from FD %d: Service=%u, Code=%u\n", 
+           client_fd, msg->dst_service, msg->msg_code);
 
     /* 注入本地调度器 */
     nos_service_msg_send(msg); 
     
     free(msg);
-    close(client_fd); // 演示版：处理完即关闭（短连接）
+    /* 注意：此处不再 close(client_fd)，实现长连接 */
 }
 
 /**
