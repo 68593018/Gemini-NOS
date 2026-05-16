@@ -7,9 +7,9 @@
 [Node] Routing: Service 101 -> Comp-1 (on Worker-1)
 [Node] Routing: Remote Service 204 -> ProcB
 [Node] ControlPlane: IPC Listening on /tmp/nos_proc_A.sock
-[Scheduler] Thread 'Mgmt-Master' (TID: 140060607379136) loop started.
-[Scheduler] Thread 'Worker-1' (TID: 140060598986432) loop started.
-[Scheduler] Thread 'Worker-2' (TID: 140060590593728) loop started.
+[Scheduler] Thread 'Mgmt-Master' (TID: 140514162636480) loop started.
+[Scheduler] Thread 'Worker-1' (TID: 140514154243776) loop started.
+[Scheduler] Thread 'Worker-2' (TID: 140514145851072) loop started.
 [Node] ProcA triggering Master-Worker initial test...
 [IPC] Received msg from FD 14 via BufferPool: Service=101, Len=56
 [Comp-1] RECEIVED: From Component 4, MsgCode 1002, Payload: Reply #1 from Comp-4

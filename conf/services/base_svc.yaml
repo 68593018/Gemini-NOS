@@ -1,5 +1,5 @@
 services:
   - id: 101
-    provider: 1
+    provider: "Comp-1"
   - id: 204
-    provider: 4
+    provider: "Comp-4"

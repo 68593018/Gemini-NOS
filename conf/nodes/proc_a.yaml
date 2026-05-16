@@ -3,6 +3,6 @@ nodes:
     uds_path: "/tmp/nos_proc_A.sock"
     threads:
       - name: "Worker-1"
-        components: [1]
+        components: ["Comp-1"]
       - name: "Worker-2"
-        components: [2, 3, 5]
+        components: ["Comp-2", "Comp-3", "Comp-5"]

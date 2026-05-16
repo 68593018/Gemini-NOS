@@ -3,4 +3,4 @@ nodes:
     uds_path: "/tmp/nos_proc_B.sock"
     threads:
       - name: "Worker-1"
-        components: [4]
+        components: ["Comp-4"]
