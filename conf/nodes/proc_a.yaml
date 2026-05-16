@@ -1,0 +1,8 @@
+nodes:
+  - name: "ProcA"
+    uds_path: "/tmp/nos_proc_A.sock"
+    threads:
+      - name: "Worker-1"
+        components: [1]
+      - name: "Worker-2"
+        components: [2, 3, 5]

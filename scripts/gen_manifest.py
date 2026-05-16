@@ -1,7 +1,7 @@
 import sys
 import os
 
-# 尝试导入 yaml，如果不存在则使用极简自定义解析
+# 尝试导入 yaml
 try:
     import yaml
     USE_PYYAML = True
@@ -9,19 +9,20 @@ except ImportError:
     USE_PYYAML = False
 
 def parse_yaml_fallback(file_path):
-    # 极简解析逻辑：仅处理本项目特定的 deploy.yaml 缩进和结构
-    # 作为一个工程化底座，推荐环境安装 PyYAML，此处为容错实现
+    # 增强版 fallback 解析器，支持从片段中提取 nodes 和 services
     data = {"nodes": [], "services": []}
     current_node = None
     current_thread = None
     
+    if not os.path.exists(file_path): return data
+
     with open(file_path, 'r') as f:
         lines = f.readlines()
         
     mode = None
     for line in lines:
         line = line.rstrip()
-        if not line or line.startswith('#'): continue
+        if not line or line.lstrip().startswith('#'): continue
         
         indent = len(line) - len(line.lstrip())
         content = line.strip()
@@ -57,6 +58,27 @@ def parse_yaml_fallback(file_path):
                 data["services"][-1]["provider"] = int(content.split(":")[1].strip())
                 
     return data
+
+def merge_config(base, new):
+    if "nodes" in new and new["nodes"]:
+        base["nodes"].extend(new["nodes"])
+    if "services" in new and new["services"]:
+        base["services"].extend(new["services"])
+
+def validate_config(data):
+    # 1. 检查 Node 名唯一性
+    node_names = [n["name"] for n in data["nodes"]]
+    if len(node_names) != len(set(node_names)):
+        print("Error: Duplicate Node names found in configuration!")
+        sys.exit(1)
+        
+    # 2. 检查 Service ID 唯一性
+    svc_ids = [s["id"] for s in data["services"]]
+    if len(svc_ids) != len(set(svc_ids)):
+        print("Error: Duplicate Service IDs found in configuration!")
+        sys.exit(1)
+
+    print(f"Validation Passed: {len(data['nodes'])} Nodes, {len(data['services'])} Services merged.")
 
 def generate_c_code(data, output_path):
     c_content = [
@@ -99,21 +121,31 @@ def generate_c_code(data, output_path):
 
     with open(output_path, 'w') as f:
         f.write("\n".join(c_content))
-    print(f"Successfully generated {output_path} from YAML.")
+    print(f"Successfully generated {output_path} from config directory.")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python3 gen_manifest.py <input.yaml> <output.c>")
+        print("Usage: python3 gen_manifest.py <input_dir> <output.c>")
         sys.exit(1)
         
-    yaml_path = sys.argv[1]
+    input_dir = sys.argv[1]
     output_path = sys.argv[2]
     
-    if USE_PYYAML:
-        with open(yaml_path, 'r') as f:
-            data = yaml.safe_load(f)
-    else:
-        print("Warning: PyYAML not found, using fallback parser.")
-        data = parse_yaml_fallback(yaml_path)
-        
-    generate_c_code(data, output_path)
+    master_data = {"nodes": [], "services": []}
+    
+    # 递归遍历目录扫描所有 YAML 文件
+    for root, dirs, files in os.walk(input_dir):
+        for file in files:
+            if file.endswith(".yaml") or file.endswith(".yml"):
+                full_path = os.path.join(root, file)
+                if USE_PYYAML:
+                    with open(full_path, 'r') as f:
+                        file_data = yaml.safe_load(f)
+                else:
+                    file_data = parse_yaml_fallback(full_path)
+                
+                if file_data:
+                    merge_config(master_data, file_data)
+                    
+    validate_config(master_data)
+    generate_c_code(master_data, output_path)

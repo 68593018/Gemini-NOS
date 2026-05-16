@@ -1,0 +1,7 @@
+services:
+  - id: 101
+    node: "ProcA"
+    provider: 1
+  - id: 204
+    node: "ProcB"
+    provider: 4
