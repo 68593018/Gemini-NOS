@@ -41,18 +41,18 @@ def parse_yaml_fallback(file_path):
             elif "components:" in content:
                 comps = content.split(":")[1].strip().strip('[]').split(',')
                 data["nodes"][-1]["threads"][-1]["components"] = [c.strip().strip('"') for c in comps if c.strip()]
-        elif mode == "services":
-            if content.startswith("- id:"):
-                data["services"].append({"id": int(content.split(":")[1].strip())})
-            elif "provider:" in content:
-                data["services"][-1]["provider"] = content.split(":")[1].strip().strip('"')
         elif mode == "components":
             if content.startswith("- name:"):
-                data["components"].append({"name": content.split(":")[1].strip().strip('"'), "model": ""})
-            elif "id:" in content:
+                data["components"].append({"name": content.split(":")[1].strip().strip('"'), "model": "", "services": []})
+            elif "id:" in content and indent == 4:
                 data["components"][-1]["id"] = int(content.split(":")[1].strip())
             elif "model:" in content:
                 data["components"][-1]["model"] = content.split(":")[1].strip().strip('"')
+            elif "name:" in content and indent > 4: # 解析实例下的服务
+                svc_name = content.split(":")[1].strip().strip('"')
+                data["components"][-1]["services"].append({"name": svc_name})
+            elif "id:" in content and indent > 4:
+                data["components"][-1]["services"][-1]["id"] = int(content.split(":")[1].strip())
         elif mode == "models":
             if content.startswith("- name:"):
                 data["models"].append({"name": content.split(":")[1].strip().strip('"'), "lib": ""})
@@ -62,7 +62,6 @@ def parse_yaml_fallback(file_path):
             if content.startswith("- name:"):
                 data["profiles"].append({"name": content.split(":")[1].strip().strip('"'), "bins": []})
             elif "size:" in content:
-                # 简单解析 { size: 32, count: 512 }
                 parts = content.strip().strip('{}').split(',')
                 bin_data = {}
                 for p in parts:
@@ -78,8 +77,21 @@ def validate_and_resolve(data):
     profile_map = {p["name"]: p["bins"] for p in data["profiles"]}
     comp_to_node = {}
     
+    # 提取所有服务定义
+    all_services = []
+    svc_name_to_id = {}
+    for comp in data["components"]:
+        for svc in comp.get("services", []):
+            all_services.append({
+                "id": svc["id"],
+                "node": None, # 后面填充
+                "provider_id": comp["id"]
+            })
+            svc_name_to_id[svc["name"]] = svc["id"]
+    data["resolved_services"] = all_services
+    data["svc_name_to_id"] = svc_name_to_id
+
     for node in data["nodes"]:
-        # 解析 Buffer 型谱
         pname = node.get("buffer_profile", "default")
         node["resolved_bins"] = profile_map.get(pname, profile_map.get("default", []))
         
@@ -106,24 +118,25 @@ def validate_and_resolve(data):
             thread["comp_names"] = resolved_names
             thread["comp_libs"] = resolved_libs
             
-    for svc in data["services"]:
-        pname = svc["provider"]
-        pid = name_to_id.get(pname)
-        if pid is None:
-            print(f"Error: Unknown provider '{pname}'"); sys.exit(1)
-        svc["provider_id"] = pid
-        svc["node"] = comp_to_node.get(pid)
-    return name_to_id
+    # 填充服务的 Node 信息
+    for svc in data["resolved_services"]:
+        svc["node"] = comp_to_node.get(svc["provider_id"])
+        
+    return name_to_id, svc_name_to_id
 
-def generate_header(name_to_id, header_path):
+def generate_header(comp_ids, svc_ids, header_path):
     lines = ["#ifndef __NOS_IDS_H__", "#define __NOS_IDS_H__", ""]
-    for name, cid in sorted(name_to_id.items(), key=lambda x: x[1]):
-        macro = to_c_macro(name)
-        lines.append(f"#define {macro:20} {cid}")
+    lines.append("/* Component IDs */")
+    for name, cid in sorted(comp_ids.items(), key=lambda x: x[1]):
+        lines.append(f"#define {to_c_macro(name):20} {cid}")
+    lines.append("")
+    lines.append("/* Service IDs */")
+    for name, sid in sorted(svc_ids.items(), key=lambda x: x[1]):
+        lines.append(f"#define {to_c_macro(name):20} {sid}")
     lines.append("")
     lines.append("#endif")
     with open(header_path, 'w') as f: f.write("\n".join(lines))
-    print(f"Generated {header_path} with {len(name_to_id)} macros.")
+    print(f"Generated {header_path} with {len(comp_ids)} components and {len(svc_ids)} services.")
 
 def generate_c_code(data, output_path):
     c_content = ['#include <string.h>', '#include "nos_manifest.h"', '']
@@ -154,7 +167,7 @@ def generate_c_code(data, output_path):
         c_content.append('    },')
     c_content.append('};')
     c_content.append('static const nos_service_def_t g_services[] = {')
-    for svc in data["services"]:
+    for svc in data["resolved_services"]:
         c_content.append(f'    {{ .service_id = {svc["id"]}, .node_name = "{svc["node"]}", .provider_comp_id = {svc["provider_id"]} }},')
     c_content.append('};\n')
     c_content.append('const nos_node_def_t* nos_manifest_get_node(const char *n) {')
@@ -177,6 +190,6 @@ if __name__ == "__main__":
                 else: fd = parse_yaml_fallback(os.path.join(r,f))
                 if fd:
                     for k in master: master[k].extend(fd.get(k, []))
-    name_to_id = validate_and_resolve(master)
-    generate_header(name_to_id, out_h)
+    comp_ids, svc_ids = validate_and_resolve(master)
+    generate_header(comp_ids, svc_ids, out_h)
     generate_c_code(master, out_c)

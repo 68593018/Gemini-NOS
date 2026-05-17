@@ -2,15 +2,27 @@ components:
   - name: "Comp-1"
     model: "Model1"
     id: 1
+    services:
+      - { name: "SVC_MGMT", id: 101 }
+
   - name: "Comp-2"
     model: "Model2"
     id: 2
+    services:
+      - { name: "SVC_ROUTING_V4", id: 102 }
+
   - name: "Comp-3"
     model: "Model3"
     id: 3
+
   - name: "Comp-4"
     model: "Model4"
     id: 4
+    services:
+      - { name: "SVC_DATA_PROC", id: 204 }
+
   - name: "Comp-5"
-    model: "Model2" # 复用 Model2 验证多实例隔离
+    model: "Model2"
     id: 5
+    services:
+      - { name: "SVC_ROUTING_V6", id: 105 }

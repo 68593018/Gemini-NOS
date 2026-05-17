@@ -36,8 +36,8 @@ static const nos_node_def_t g_nodes[] = {
 static const nos_service_def_t g_services[] = {
     { .service_id = 101, .node_name = "ProcA", .provider_comp_id = 1 },
     { .service_id = 102, .node_name = "ProcA", .provider_comp_id = 2 },
-    { .service_id = 105, .node_name = "ProcA", .provider_comp_id = 5 },
     { .service_id = 204, .node_name = "ProcB", .provider_comp_id = 4 },
+    { .service_id = 105, .node_name = "ProcA", .provider_comp_id = 5 },
 };
 
 const nos_node_def_t* nos_manifest_get_node(const char *n) {

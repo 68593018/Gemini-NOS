@@ -10,6 +10,7 @@
 #include "nos_scheduler.h"
 #include "nos_manifest.h"
 #include "nos_buffer.h"
+#include "nos_ids.h"
 
 #define MAX_WORKERS 8
 #define MAX_COMPONENTS_PER_NODE 64
@@ -167,9 +168,10 @@ static void node_setup_routing(const char *current_node_name, nos_thread_t *work
 static void node_run_test_trigger(const char *node_name) {
     if (strcmp(node_name, "ProcA") == 0) {
         sleep(2);
-        printf("[Node] %s triggering isolation test (Ping Services 102 and 105)...\n", node_name);
+        printf("[Node] %s triggering integration test (Local: %u/%u, Remote: %u)...\n", 
+               node_name, SVC_ROUTING_V4, SVC_ROUTING_V6, SVC_DATA_PROC);
         
-        uint32_t targets[] = {102, 105, 102, 102}; // 多次发送给 102，确认 105 不受影响
+        uint32_t targets[] = {SVC_ROUTING_V4, SVC_ROUTING_V6, SVC_DATA_PROC, SVC_ROUTING_V4}; 
         for (int i = 0; i < 4; i++) {
             nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 0);
             if (buf) {

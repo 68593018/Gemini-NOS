@@ -5,6 +5,7 @@
 #include "nos_component.h"
 #include "nos_service.h"
 #include "nos_buffer.h"
+#include "nos_ids.h"
 
 /* 组件私有上下文定义 */
 typedef struct {

@@ -5,25 +5,25 @@
 #include "nos_component.h"
 #include "nos_service.h"
 #include "nos_buffer.h"
+#include "nos_ids.h"
 
 typedef struct {
     int counter;
 } comp_ctx_t;
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
-    comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
     const char *payload = (const char *)((uint8_t *)msg + sizeof(nos_service_msg_t));
     printf("[%s] RECEIVED: From Component %u, MsgCode %u, Payload: %s\n", 
            self->name, msg->src_component, msg->msg_code, payload);
 
     if (msg->msg_code == 1001) {
-        printf("[%s] Auto-replying to Remote Service 101...\n", self->name);
+        printf("[%s] Auto-replying to MGMT Service...\n", self->name);
         nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 0);
         if (buf) {
             nos_service_msg_t *rsp = (nos_service_msg_t *)buf->data;
             rsp->magic = NOS_IPC_MAGIC;
             rsp->version = NOS_IPC_VERSION;
-            rsp->dst_service = 101; 
+            rsp->dst_service = SVC_MGMT; 
             rsp->src_component = self->id;
             rsp->msg_code = 1002;
             rsp->payload_len = 32;
