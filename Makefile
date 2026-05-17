@@ -10,6 +10,8 @@ CONFIG_FILES = $(shell find $(CONFIG_DIR) -name "*.yaml" -o -name "*.yml")
 SRCS = src/core/nos_scheduler.c \
        src/core/nos_manifest.c \
        src/core/nos_buffer.c \
+       src/core/nos_node_mgr.c \
+       src/core/nos_cli.c \
        src/infra/nos_ipc_p2p.c \
        src/core/nos_node_main.c
 
