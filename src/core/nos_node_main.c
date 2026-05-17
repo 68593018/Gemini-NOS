@@ -10,6 +10,7 @@
 #include "nos_cli.h"
 #include "nos_buffer.h"
 #include "nos_log.h"
+#include "nos_api.h"
 
 /* 定义并初始化全局上下文 */
 nos_node_ctx_t g_node_ctx = {
@@ -19,7 +20,7 @@ nos_node_ctx_t g_node_ctx = {
 };
 
 static void signal_handler(int sig) {
-    printf("\n[Node] Received signal %d, initiating graceful shutdown...\n", sig);
+    nos_sys_log_info("Received signal %d, initiating graceful shutdown...", sig);
     g_node_ctx.keep_running = 0;
 }
 
@@ -30,7 +31,7 @@ static void* scheduler_thread_entry(void *arg) {
 
 int main(int argc, char *argv[]) {
     const nos_node_def_t *node_def = nos_manifest_get_local();
-    if (!node_def) { printf("Error: Local node manifest not found.\n"); return -1; }
+    if (!node_def) { nos_sys_log_error("Local node manifest not found."); return -1; }
 
     g_node_ctx.node_def = node_def;
 
@@ -41,7 +42,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("--- [NOS Node: %s] Starting ---\n", node_def->name);
+    nos_sys_log_info("--- [NOS Node: %s] Starting ---", node_def->name);
+    
     nos_buffer_init_pool(node_def->buffer_pools);
 
     /* 1. 初始化管理面与数据面线程 */
@@ -74,7 +76,7 @@ int main(int argc, char *argv[]) {
     while (g_node_ctx.keep_running) sleep(1);
 
     /* 7. 优雅关闭 */
-    printf("[Node] Shutting down...\n");
+    nos_sys_log_info("Node shutting down...");
     nos_scheduler_stop(g_node_ctx.mgmt_thread);
     for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) nos_scheduler_stop(&g_node_ctx.worker_threads[i]);
 
@@ -92,6 +94,6 @@ int main(int argc, char *argv[]) {
     free(g_node_ctx.mgmt_thread);
     free(g_node_ctx.worker_threads);
 
-    printf("[Node] Shutdown complete.\n");
+    nos_sys_log_info("Shutdown complete.");
     return 0;
 }

@@ -9,6 +9,7 @@
 #include "nos_scheduler.h"
 #include "nos_service.h"
 #include "nos_buffer.h"
+#include "nos_api.h"
 
 /**
  * @brief 处理已建立连接的 Socket 数据读取
@@ -21,26 +22,26 @@ static void nos_ipc_data_handler(int client_fd, void *arg) {
     ssize_t ret = recv(client_fd, &header, sizeof(header), 0);
     if (ret <= 0) {
         if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-        if (ret == 0) printf("[IPC] Remote closed connection (FD:%d).\n", client_fd);
-        else perror("recv header");
+        if (ret == 0) nos_sys_log_info("Remote closed connection (FD:%d).", client_fd);
+        else nos_sys_log_error("recv header failed: %s", strerror(errno));
         goto err_close;
     }
 
     if (ret < (ssize_t)sizeof(header)) {
-        printf("[IPC] Partial header received. Protocol out of sync.\n");
+        nos_sys_log_error("Partial header received. Protocol out of sync.");
         goto err_close;
     }
 
     /* 2. 幻数与版本强校验 */
     if (header.magic != NOS_IPC_MAGIC) {
-        printf("[IPC] Protocol error: Invalid magic 0x%04X. Dropping.\n", header.magic);
+        nos_sys_log_error("Protocol error: Invalid magic 0x%04X. Dropping.", header.magic);
         goto err_close;
     }
 
     /* 3. 申请 Buffer 池内存并读取 Payload */
     nos_buffer_t *buf = nos_buffer_alloc(sizeof(header) + header.payload_len, 0);
     if (!buf) {
-        printf("[IPC] Buffer Pool empty! Dropping message.\n");
+        nos_sys_log_error("Buffer Pool empty! Dropping message.");
         goto err_close;
     }
 
@@ -52,14 +53,14 @@ static void nos_ipc_data_handler(int client_fd, void *arg) {
         /* 读取剩余 Payload 直接存入 Buffer 数据区 */
         ret = recv(client_fd, buf->data + sizeof(header), header.payload_len, MSG_WAITALL);
         if (ret < (ssize_t)header.payload_len) {
-            printf("[IPC] Failed to read complete payload.\n");
+            nos_sys_log_error("Failed to read complete payload.");
             nos_buffer_release(buf);
             goto err_close;
         }
         buf->len += ret;
     }
 
-    printf("[IPC] Received msg from FD %d via BufferPool: Service=%u, Len=%u\n", 
+    nos_sys_log_debug("Received msg from FD %d via BufferPool: Service=%u, Len=%u", 
            client_fd, header.dst_service, buf->len);
 
     /* 4. 注入本地调度器 (所有权转移) */
@@ -107,7 +108,7 @@ nos_status_t nos_ipc_init(nos_thread_t *thread, const char *uds_path) {
 
     unlink(uds_path); // 确保路径可用
     if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("IPC Bind");
+        nos_sys_log_error("IPC Bind failed: %s", strerror(errno));
         close(listen_fd);
         return NOS_ERR;
     }

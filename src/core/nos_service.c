@@ -4,6 +4,7 @@
 #include "nos_service.h"
 #include "nos_node_mgr.h"
 #include "nos_node_priv.h"
+#include "nos_api.h"
 
 #define MAX_EMBEDDED_SERVICES 32
 
@@ -16,7 +17,7 @@ nos_status_t nos_embedded_service_register(const char *name, void *ops) {
     g_embedded_registry[g_embedded_count].service_name = name;
     g_embedded_registry[g_embedded_count].ops = ops;
     g_embedded_count++;
-    printf("[Service] Registered embedded service: %s\n", name);
+    nos_sys_log_info("Registered embedded service: %s", name);
     return NOS_OK;
 }
 
