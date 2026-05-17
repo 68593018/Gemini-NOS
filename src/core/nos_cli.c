@@ -138,16 +138,18 @@ static void* node_cli_thread_entry(void *arg) {
             }
         } else if (strcmp(cmd_buf, "show services") == 0) {
             const nos_node_def_t *node = g_node_ctx.node_def;
-            printf("\n%-8s %-15s %-8s %-10s\n", "Svc-ID", "Node", "Comp-ID", "Location");
-            printf("----------------------------------------------------------\n");
+            printf("\n%-18s %-8s %-10s %-8s %-10s\n", "Name", "Svc-ID", "Node", "Comp-ID", "Location");
+            printf("----------------------------------------------------------------------\n");
             for (uint32_t i = 0; i < node->service_count; i++) {
                 const nos_service_def_t *svc = &node->services[i];
                 const char *location = "Remote";
-                if (strcmp(svc->node_name, node->name) == 0) {
+                if (strcmp(svc->node_name, "Platform") == 0) {
+                    location = "Embedded";
+                } else if (strcmp(svc->node_name, node->name) == 0) {
                     location = "Local";
                 }
-                printf("%-8u %-15s %-8u %-10s\n", 
-                       svc->service_id, svc->node_name, 
+                printf("%-18s %-8u %-10s %-8u %-10s\n", 
+                       svc->service_name, svc->service_id, svc->node_name, 
                        svc->provider_comp_id, location);
             }
         }

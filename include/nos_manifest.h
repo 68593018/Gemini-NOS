@@ -53,6 +53,7 @@ typedef enum {
  * @brief 服务定义
  */
 typedef struct nos_service_def_s {
+    const char *service_name; /**< 服务逻辑名称 */
     uint32_t service_id;    /**< 服务逻辑 ID */
     const char *node_name;  /**< 提供该服务的节点名称 */
     uint32_t provider_comp_id; /**< 提供该服务的组件 ID */

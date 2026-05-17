@@ -81,37 +81,32 @@ def parse_yaml_fallback(file_path):
                 data["profiles"][-1]["bins"].append(bin_data)
     return data
 
-# 定义基础设施服务的初始化函数映射
-INFRA_INIT_MAP = {
-    "SVC_LOG": "nos_log_init"
-}
+INFRA_INIT_MAP = {"SVC_LOG": "nos_log_init"}
 
 def validate_and_resolve(data):
     comp_map = {c["name"]: c for c in data["components"]}
     model_to_lib = {m["name"]: m["lib"] for m in data["models"]}
-    global_svc_map = {}
-    svc_name_to_id = {}
-    comp_to_node = {}
+    global_svc_map, svc_name_to_id, comp_to_node = {}, {}, {}
     node_to_uds = {n["name"]: n["uds_path"] for n in data["nodes"]}
 
     for svc in data.get("platform", {}).get("provides", []):
-        global_svc_map[svc["name"]] = {"id": svc["id"], "type": "embedded", "node": "Platform"}
+        global_svc_map[svc["name"]] = {"name": svc["name"], "id": svc["id"], "type": "embedded", "node": "Platform"}
         svc_name_to_id[svc["name"]] = svc["id"]
 
     for node in data["nodes"]:
         for thread in node["threads"]:
             for comp_name in thread["components"]:
-                comp_to_node[comp_name] = node["name"]
+                if comp_name in comp_map: comp_to_node[comp_name] = node["name"]
 
     for comp in data["components"]:
         for svc in comp.get("provides", []):
-            svc_name = svc["name"]
-            global_svc_map[svc_name] = {
-                "id": svc["id"], "type": "remote", "provider_id": comp["id"],
+            sname = svc["name"]
+            global_svc_map[sname] = {
+                "name": sname, "id": svc["id"], "type": "remote", "provider_id": comp["id"],
                 "node": comp_to_node.get(comp["name"], "Unknown"),
                 "uds_path": node_to_uds.get(comp_to_node.get(comp["name"], ""), "")
             }
-            svc_name_to_id[svc_name] = svc["id"]
+            svc_name_to_id[sname] = svc["id"]
 
     profile_map = {p["name"]: p["bins"] for p in data["profiles"]}
     for node in data["nodes"]:
@@ -133,12 +128,8 @@ def validate_and_resolve(data):
             for s in comp.get("requires", []): needed_svc_names.add(s)
         
         node["resolved_services"] = [global_svc_map[s] for s in needed_svc_names if s in global_svc_map]
-        
-        # 确定需要哪些平台初始化函数
-        inits = []
-        for sname in needed_svc_names:
-            if sname in INFRA_INIT_MAP: inits.append(INFRA_INIT_MAP[sname])
-        node["platform_inits"] = list(set(inits)) # 去重
+        inits = [INFRA_INIT_MAP[sname] for sname in needed_svc_names if sname in INFRA_INIT_MAP]
+        node["platform_inits"] = list(set(inits))
 
     return {c["name"]: c["id"] for c in data["components"]}, svc_name_to_id
 
@@ -152,25 +143,17 @@ def generate_header(comp_ids, svc_ids, header_path):
 
 def generate_node_manifest(node, output_path):
     c_content = ['#include <string.h>', '#include "nos_manifest.h"', '']
-    # 声明基础设施初始化函数
-    for init_func in node["platform_inits"]:
-        c_content.append(f'extern void {init_func}(void);')
+    for init_func in node["platform_inits"]: c_content.append(f'extern void {init_func}(void);')
     c_content.append('')
-
     c_content.append(f'static const nos_buffer_pool_def_t g_local_pools[] = {{')
     for b in node["resolved_bins"]: c_content.append(f'    {{ .chunk_size = {b["size"]}, .chunk_count = {b["count"]} }},')
     c_content.append('    { .chunk_size = 0 }\n};')
-    
     c_content.append(f'static const nos_service_def_t g_local_services[] = {{')
     for s in node["resolved_services"]:
-        c_content.append(f'    {{ .service_id = {s["id"]}, .node_name = "{s["node"]}", .provider_comp_id = {s.get("provider_id", 0)}, .remote_uds_path = "{s.get("uds_path", "")}" }},')
-    c_content.append(f'    {{ .service_id = 0 }}\n}};')
-
-    if node["platform_inits"]:
-        c_content.append(f'static const nos_platform_init_func_t g_infra_inits[] = {{ {" ,".join(node["platform_inits"])}, NULL }};')
-    else:
-        c_content.append('static const nos_platform_init_func_t g_infra_inits[] = { NULL };')
-
+        c_content.append(f'    {{ .service_name = "{s["name"]}", .service_id = {s["id"]}, .node_name = "{s["node"]}", .provider_comp_id = {s.get("provider_id", 0)}, .remote_uds_path = "{s.get("uds_path", "")}" }},')
+    c_content.append(f'    {{ .service_name = NULL, .service_id = 0 }}\n}};')
+    inits_str = " ,".join(node["platform_inits"]) if node["platform_inits"] else ""
+    c_content.append(f'static const nos_platform_init_func_t g_infra_inits[] = {{ {inits_str}{" ," if inits_str else ""} NULL }};')
     c_content.append('const nos_node_def_t g_local_node_def = {')
     c_content.append(f'    .name = "{node["name"]}", .uds_path = "{node["uds_path"]}", .buffer_pools = g_local_pools,')
     c_content.append('    .threads = {')
@@ -178,9 +161,7 @@ def generate_node_manifest(node, output_path):
         ids, names, libs = ", ".join(map(str, thread["comp_ids"])), ", ".join(f'"{n}"' for n in thread["comp_names"]), ", ".join(f'"{l}"' for l in thread["comp_libs"])
         c_content.append(f'        {{ .name = "{thread["name"]}", .comp_ids = {{{ids}, 0}}, .comp_names = {{{names}, NULL}}, .comp_models = {{{libs}, NULL}} }},')
     c_content.append('        { .name = NULL }\n    },')
-    c_content.append(f'    .services = g_local_services, .service_count = {len(node["resolved_services"])},')
-    c_content.append('    .platform_inits = g_infra_inits')
-    c_content.append('};')
+    c_content.append(f'    .services = g_local_services, .service_count = {len(node["resolved_services"])}, .platform_inits = g_infra_inits\n}};')
     c_content.append('\nconst nos_node_def_t* nos_manifest_get_local(void) { return &g_local_node_def; }')
     with open(output_path, 'w') as f: f.write("\n".join(c_content))
 
@@ -195,10 +176,14 @@ if __name__ == "__main__":
                     with open(os.path.join(r,f)) as y:
                         fd = yaml.safe_load(y)
                         if fd and "platform" in fd: master["platform"]["provides"].extend(fd["platform"].get("provides", []))
-                else: fd = parse_yaml_fallback(os.path.join(r,f))
-                if fd:
-                    for k in ["nodes", "components", "profiles", "models"]:
-                        if k in fd: master[k].extend(fd[k])
+                        if fd:
+                            for k in ["nodes", "components", "profiles", "models"]:
+                                if k in fd: master[k].extend(fd[k])
+                else:
+                    fd = parse_yaml_fallback(os.path.join(r,f))
+                    if fd:
+                        master["platform"]["provides"].extend(fd["platform"]["provides"])
+                        for k in ["nodes", "components", "profiles", "models"]: master[k].extend(fd[k])
     comp_ids, svc_ids = validate_and_resolve(master)
     generate_header(comp_ids, svc_ids, out_h)
     for node in master["nodes"]:
