@@ -268,6 +268,67 @@ static void node_run_test_trigger(const char *node_name) {
     }
 }
 
+/**
+ * @brief CLI 帮助信息
+ */
+static void cli_print_help(void) {
+    printf("\n--- NOS Node CLI Commands ---\n");
+    printf("  show components       - List all loaded components\n");
+    printf("  show services         - List all service routes\n");
+    printf("  load <comp_name>      - Reload/Load a component\n");
+    printf("  unload <comp_name>    - Unload a component\n");
+    printf("  help                  - Show this help\n");
+    printf("  quit                  - Shutdown the node\n");
+    printf("-----------------------------\n");
+}
+
+/**
+ * @brief CLI 线程入口
+ */
+static void* node_cli_thread_entry(void *arg) {
+    char cmd_buf[256];
+    printf("[CLI] Management interface started. Type 'help' for commands.\n");
+
+    while (g_node_ctx.keep_running) {
+        printf("\nnos-node(%s)> ", (char*)arg);
+        fflush(stdout);
+
+        if (!fgets(cmd_buf, sizeof(cmd_buf), stdin)) break;
+        cmd_buf[strcspn(cmd_buf, "\n")] = 0; // 移除换行符
+
+        if (strlen(cmd_buf) == 0) continue;
+
+        if (strcmp(cmd_buf, "help") == 0) {
+            cli_print_help();
+        } else if (strcmp(cmd_buf, "quit") == 0) {
+            g_node_ctx.keep_running = 0;
+        } else if (strcmp(cmd_buf, "show components") == 0) {
+            printf("\n%-15s %-4s %-15s %-12s\n", "Name", "ID", "Model-Lib", "Thread");
+            printf("----------------------------------------------------------\n");
+            for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
+                loaded_comp_info_t *info = &g_node_ctx.loaded_info[i];
+                printf("%-15s %-4u %-15s %-12s\n", 
+                       info->comp->name, info->comp->id, info->lib_name, info->owner_thread->name);
+            }
+        } else if (strcmp(cmd_buf, "show services") == 0) {
+            uint32_t count = 0;
+            const nos_service_def_t *svc_list = nos_manifest_get_services(&count);
+            printf("\n%-8s %-15s %-10s\n", "Svc-ID", "Node", "Provider-ID");
+            printf("------------------------------------------\n");
+            for (uint32_t i = 0; i < count; i++) {
+                printf("%-8u %-15s %-10u\n", svc_list[i].service_id, svc_list[i].node_name, svc_list[i].provider_comp_id);
+            }
+        } else if (strncmp(cmd_buf, "unload ", 7) == 0) {
+            node_unload_component(cmd_buf + 7);
+        } else if (strncmp(cmd_buf, "load ", 5) == 0) {
+            node_reload_component(cmd_buf + 5);
+        } else {
+            printf("Unknown command: %s\n", cmd_buf);
+        }
+    }
+    return NULL;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) { printf("Usage: %s <node_name>\n", argv[0]); return -1; }
 
@@ -296,7 +357,11 @@ int main(int argc, char *argv[]) {
         pthread_create(&g_node_ctx.worker_tids[i], NULL, scheduler_thread_entry, &g_node_ctx.worker_threads[i]);
     }
 
-    node_run_test_trigger(node_name);
+    /* 启动 CLI 交互线程 */
+    pthread_t cli_tid;
+    pthread_create(&cli_tid, NULL, node_cli_thread_entry, (void*)node_name);
+
+    // node_run_test_trigger(node_name); // 用户现在可以手动操作了
 
     while (g_node_ctx.keep_running) sleep(1);
 
