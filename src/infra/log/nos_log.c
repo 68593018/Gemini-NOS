@@ -38,6 +38,7 @@ typedef struct {
     nos_comp_info_t comp_info[MAX_COMP_ID];
 
     pthread_t consumer_tid;
+    _Atomic unsigned long dropped_count;
     int initialized;
 } nos_log_context_t;
 
@@ -45,6 +46,7 @@ static nos_log_context_t g_log_ctx = {
     .write_idx = 0,
     .read_idx = 0,
     .global_filter_level = NOS_LOG_LEVEL_DEBUG,
+    .dropped_count = 0,
     .initialized = 0
 };
 
@@ -96,9 +98,10 @@ static void nos_log_impl(nos_log_level_t level, uint32_t comp_id, const char *fm
     unsigned int idx = atomic_fetch_add(&ctx->write_idx, 1) % LOG_BUFFER_SIZE;
     nos_log_entry_t *entry = &ctx->ring[idx];
 
-    // Wait for the slot to be consumed if we wrap around
-    while (atomic_load(&entry->ready) == 1) {
-        usleep(100);
+    // Industrial Grade: Non-blocking discard policy to protect business performance
+    if (atomic_load(&entry->ready) == 1) {
+        atomic_fetch_add(&ctx->dropped_count, 1);
+        return;
     }
 
     entry->level = level;
@@ -129,6 +132,11 @@ static void nos_set_comp_level_impl(uint32_t comp_id, nos_log_level_t level) {
     
     nos_log_impl(NOS_LOG_LEVEL_INFO, 0, "Component ID [%u] filter level set to %s", comp_id, level_to_str(level));
 }
+
+void nos_log_get_stats(unsigned long *total_dropped) {
+    if (total_dropped) *total_dropped = atomic_load(&g_log_ctx.dropped_count);
+}
+
 
 void nos_log_set_comp_info(uint32_t comp_id, const char *name) {
     if (comp_id == 0 || comp_id >= MAX_COMP_ID || !name) return;

@@ -111,6 +111,14 @@ nos_status_t nos_kv_put(nos_kv_table_t *table, const void *key, const void *val,
         if (memcmp(entry->data, key, table->key_size) == 0) {
             if (val) memcpy(entry->data + table->key_size, val, val_len);
             entry->val_len = val_len;
+
+            /* Notify subscribers */
+            nos_kv_sub_t *sub = entry->sub_list;
+            while (sub) {
+                sub->notify(table, key, val, val_len, sub->arg);
+                sub = sub->next;
+            }
+
             pthread_rwlock_unlock(&bucket->lock);
             return NOS_OK;
         }
@@ -128,6 +136,7 @@ nos_status_t nos_kv_put(nos_kv_table_t *table, const void *key, const void *val,
     memcpy(new_entry->data, key, table->key_size);
     if (val) memcpy(new_entry->data + table->key_size, val, val_len);
     new_entry->val_len = val_len;
+    new_entry->sub_list = NULL;
     
     new_entry->next_idx = bucket->first_idx;
     bucket->first_idx = new_idx;
@@ -197,6 +206,33 @@ void nos_kv_release_ptr(void *handle) {
     free(h);
 }
 
+nos_status_t nos_kv_subscribe(nos_kv_table_t *table, const void *key, nos_kv_notify_fn notify, void *arg) {
+    if (!table || !key || !notify) return NOS_ERR;
+
+    uint32_t hash = murmurhash3_32(key, table->key_size, 0);
+    nos_kv_bucket_t *bucket = &table->buckets[hash % table->bucket_count];
+
+    pthread_rwlock_wrlock(&bucket->lock);
+
+    uint32_t curr_idx = bucket->first_idx;
+    while (curr_idx != KV_INVALID_IDX) {
+        nos_kv_entry_t *entry = get_entry(table, curr_idx);
+        if (memcmp(entry->data, key, table->key_size) == 0) {
+            nos_kv_sub_t *sub = malloc(sizeof(nos_kv_sub_t));
+            sub->notify = notify;
+            sub->arg = arg;
+            sub->next = entry->sub_list;
+            entry->sub_list = sub;
+            pthread_rwlock_unlock(&bucket->lock);
+            return NOS_OK;
+        }
+        curr_idx = entry->next_idx;
+    }
+
+    pthread_rwlock_unlock(&bucket->lock);
+    return NOS_ERR;
+}
+
 nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key) {
     if (!table || !key) return NOS_ERR;
 
@@ -213,6 +249,15 @@ nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key) {
         if (memcmp(entry->data, key, table->key_size) == 0) {
             if (prev_idx == KV_INVALID_IDX) bucket->first_idx = entry->next_idx;
             else get_entry(table, prev_idx)->next_idx = entry->next_idx;
+
+            /* Free subscribers */
+            nos_kv_sub_t *sub = entry->sub_list;
+            while (sub) {
+                nos_kv_sub_t *next = sub->next;
+                free(sub);
+                sub = next;
+            }
+            entry->sub_list = NULL;
 
             table->free_stack[++table->free_top] = curr_idx;
             table->used_count--;
@@ -271,7 +316,8 @@ static nos_kv_ops_t g_kv_ops = {
     .get = nos_kv_get,
     .get_ptr = nos_kv_get_ptr,
     .release_ptr = nos_kv_release_ptr,
-    .del = nos_kv_del
+    .del = nos_kv_del,
+    .subscribe = nos_kv_subscribe
 };
 
 void nos_kv_db_init(void) {

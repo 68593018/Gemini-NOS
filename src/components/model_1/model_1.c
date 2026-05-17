@@ -10,7 +10,16 @@
 
 typedef struct {
     nos_timer_t *heartbeat_timer;
+    nos_kv_table_t *comp2_state_table;
 } comp_ctx_t;
+
+static void on_comp2_state_change(nos_kv_table_t *table, const void *key, const void *val, uint32_t val_len, void *arg) {
+    nos_component_t *self = (nos_component_t *)arg;
+    if (val_len == sizeof(int)) {
+        int counter = *(int *)val;
+        nos_log_info(self, "DETECTED: Comp-2 state changed to %d via KV Sub/Notify!", counter);
+    }
+}
 
 /* 真正的定时器到期回调 */
 static void heartbeat_callback(void *arg) {
@@ -62,6 +71,17 @@ static nos_status_t comp_start(nos_component_t *self) {
     if (ctx->heartbeat_timer) {
         nos_timer_start_auto(self, ctx->heartbeat_timer, 10000, 1);
         nos_log_info(self, "Heartbeat timer object created and started (10s)");
+    }
+
+    /* 3. 订阅 Comp-2 的状态 (KV Pub/Sub 验证) */
+    ctx->comp2_state_table = nos_kv_table_create_auto("CompStates", 32, sizeof(int), 128);
+    if (ctx->comp2_state_table) {
+        char key[32] = "Comp-2"; // 对应 Model-2 的名称
+        if (nos_kv_subscribe_auto(ctx->comp2_state_table, key, on_comp2_state_change, self) == NOS_OK) {
+            nos_log_info(self, "Subscribed to Comp-2 state changes in KV DB");
+        } else {
+            nos_log_warn(self, "Failed to subscribe to Comp-2 state (might not exist yet)");
+        }
     }
     return NOS_OK;
 }

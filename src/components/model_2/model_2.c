@@ -36,9 +36,11 @@ static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     /* 2. 原有业务逻辑 */
     ctx->local_counter++;
     
-    /* 1. 同步组件运行状态 (Key 是字符串名称) */
+    /* 1. 同步组件运行状态 (Key 是字符串名称，需填充对齐) */
     if (ctx->state_table) {
-        nos_kv_put_auto(ctx->state_table, self->name, &ctx->local_counter, sizeof(int));
+        char key[32] = {0};
+        strncpy(key, self->name, 31);
+        nos_kv_put_auto(ctx->state_table, key, &ctx->local_counter, sizeof(int));
     }
 
     /* 2. 写入测试数据 (Key 和 Value 都是当前的 counter) */
@@ -62,9 +64,15 @@ static nos_status_t comp_init(nos_component_t *self) {
 
     /* 恢复状态 */
     if (ctx->state_table) {
+        char key[32] = {0};
+        strncpy(key, self->name, 31);
         uint32_t len = sizeof(int);
-        if (nos_kv_get_auto(ctx->state_table, self->name, &ctx->local_counter, &len) == NOS_OK) {
+        if (nos_kv_get_auto(ctx->state_table, key, &ctx->local_counter, &len) == NOS_OK) {
             nos_log_info(self, "State recovered from KV DB: counter = %d", ctx->local_counter);
+        } else {
+            /* 初始写入，便于其他组件订阅 */
+            int initial_val = 0;
+            nos_kv_put_auto(ctx->state_table, key, &initial_val, sizeof(int));
         }
     }
     nos_log_debug(self, "Component instance with multiple KV tables initialized");

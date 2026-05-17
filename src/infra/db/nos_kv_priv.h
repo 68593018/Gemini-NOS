@@ -7,12 +7,22 @@
 #define KV_INVALID_IDX 0xFFFFFFFF
 
 /**
+ * @brief 订阅者节点
+ */
+typedef struct nos_kv_sub {
+    nos_kv_notify_fn notify;
+    void            *arg;
+    struct nos_kv_sub *next;
+} nos_kv_sub_t;
+
+/**
  * @brief 单个 KV 条目
  * 内存布局: [Header] + [Key_Data] + [Value_Data]
  */
 typedef struct {
     uint32_t next_idx;     // 冲突链索引
     uint32_t val_len;      // 当前有效 Value 长度
+    nos_kv_sub_t *sub_list; // 订阅者链表
     uint8_t  data[];       // 柔性数组
 } nos_kv_entry_t;
 

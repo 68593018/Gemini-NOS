@@ -47,6 +47,17 @@ static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
         return;
     }
 
+    /* 1.1 触发压力日志测试 (新指令) */
+    if (msg->msg_code == 3002) {
+        uint32_t log_count = (msg->payload_len >= 4) ? *(uint32_t*)(msg + 1) : 2000;
+        nos_log_info(self, "Starting Spam Logging: %u messages", log_count);
+        for (uint32_t i = 0; i < log_count; i++) {
+            nos_log_debug(self, "Spam message #%u for stress testing", i);
+        }
+        nos_log_info(self, "Spam Logging Complete");
+        return;
+    }
+
     /* 2. 收到 PONG 回包 (Code 2002) */
     if (msg->msg_code == 2002) {
         ctx->current_count++;

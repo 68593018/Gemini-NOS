@@ -9,3 +9,4 @@ nos_async_demo
 # Temporary files
 *.swp
 *~
+*.log

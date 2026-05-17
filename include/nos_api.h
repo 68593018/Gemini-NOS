@@ -61,4 +61,7 @@ static inline nos_kv_ops_t* _nos_get_kv_ops(void) {
 #define nos_kv_get_auto(t, k, v, len) \
     ({ nos_kv_ops_t *ops = _nos_get_kv_ops(); ops ? ops->get(t, k, v, len) : NOS_ERR; })
 
+#define nos_kv_subscribe_auto(t, k, cb, arg) \
+    ({ nos_kv_ops_t *ops = _nos_get_kv_ops(); ops ? ops->subscribe(t, k, cb, arg) : NOS_ERR; })
+
 #endif /* __NOS_API_H__ */

@@ -31,6 +31,7 @@ static void do_show_components(const char *args);
 static void do_show_services(const char *args);
 static void do_show_db(const char *args);
 static void do_show_memory(const char *args);
+static void do_log(const char *args);
 static void do_perf_start(const char *args);
 static void do_load(const char *args);
 static void do_unload(const char *args);
@@ -48,6 +49,7 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {"show services",   "List all service routes",         do_show_services},
     {"show db",         "List all KV tables status",        do_show_db},
     {"show memory",     "Show process memory consumption",  do_show_memory},
+    {"log",             "Manage logging (stats, level)",    do_log},
     {"perf start",      "Start IPC performance test",       do_perf_start},
     {"load",            "Load a component by name",         do_load},
     {"unload",          "Unload a component by name",       do_unload},
@@ -131,6 +133,59 @@ static void do_show_memory(const char *args) {
     }
     printf("------------------------------------------------------------\n");
     printf("%-20s %-15zu\n\n", "Total Accounted", log_mem + kv_mem + buf_mem + sch_mem + total_comp_mem);
+}
+
+static nos_log_level_t str_to_level(const char *str) {
+    if (strcasecmp(str, "debug") == 0) return NOS_LOG_LEVEL_DEBUG;
+    if (strcasecmp(str, "info") == 0)  return NOS_LOG_LEVEL_INFO;
+    if (strcasecmp(str, "warn") == 0)  return NOS_LOG_LEVEL_WARN;
+    if (strcasecmp(str, "error") == 0) return NOS_LOG_LEVEL_ERROR;
+    return NOS_LOG_LEVEL_INFO;
+}
+
+static void do_log(const char *args) {
+    if (!args) {
+        printf("Usage: log stats | log level <DEBUG|INFO|WARN|ERROR> | log level <comp_id> <level>\n");
+        return;
+    }
+
+    if (strncmp(args, "stats", 5) == 0) {
+        unsigned long dropped = 0;
+        extern void nos_log_get_stats(unsigned long *total_dropped);
+        nos_log_get_stats(&dropped);
+        printf("\n--- NOS Logging Statistics ---\n");
+        printf("Dropped Messages: %lu\n", dropped);
+        if (dropped > 0) printf("Warning: High log volume or slow consumer. Consider increasing LOG_BUFFER_SIZE.\n");
+        printf("------------------------------\n");
+    } else if (strncmp(args, "spam", 4) == 0) {
+        uint32_t count = (args[4] != '\0') ? (uint32_t)atoi(args + 5) : 2000;
+        nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + sizeof(uint32_t), 0);
+        if (buf) {
+            nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+            msg->magic = NOS_IPC_MAGIC;
+            msg->dst_service = 110; // SVC_PERF_RX (Comp-3)
+            msg->msg_code = 3002; // SPAM_LOG
+            msg->payload_len = sizeof(uint32_t);
+            memcpy(msg + 1, &count, sizeof(uint32_t));
+            printf("[CLI] Triggering spam logging test with %u messages...\n", count);
+            nos_service_msg_send(buf);
+            nos_buffer_release(buf);
+        }
+    } else if (strncmp(args, "level", 5) == 0) {
+        char sub[64], val[64];
+        int count = sscanf(args + 6, "%s %s", sub, val);
+        nos_log_ops_t *log_ops = (nos_log_ops_t *)nos_embedded_service_get("SVC_LOG");
+        if (!log_ops) { printf("Log service not found.\n"); return; }
+
+        if (count == 1) {
+            log_ops->set_filter_level(str_to_level(sub));
+        } else if (count == 2) {
+            uint32_t comp_id = (uint32_t)atoi(sub);
+            log_ops->set_comp_level(comp_id, str_to_level(val));
+        } else {
+            printf("Usage: log level <level> | log level <comp_id> <level>\n");
+        }
+    }
 }
 
 static void do_perf_start(const char *args) {

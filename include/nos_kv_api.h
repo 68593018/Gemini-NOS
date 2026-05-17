@@ -61,6 +61,11 @@ void nos_kv_dump_all(void);
 size_t nos_kv_get_total_mem_usage(void);
 
 /**
+ * @brief KV 变更通知回调函数
+ */
+typedef void (*nos_kv_notify_fn)(nos_kv_table_t *table, const void *key, const void *val, uint32_t val_len, void *arg);
+
+/**
  * @brief KV 服务操作接口 (API Table)
  */
 typedef struct {
@@ -70,6 +75,7 @@ typedef struct {
     nos_status_t    (*get_ptr)(nos_kv_table_t *table, const void *key, const void **out_ptr, uint32_t *out_len, void **out_handle);
     void            (*release_ptr)(void *handle);
     nos_status_t    (*del)(nos_kv_table_t *table, const void *key);
+    nos_status_t    (*subscribe)(nos_kv_table_t *table, const void *key, nos_kv_notify_fn notify, void *arg);
 } nos_kv_ops_t;
 
 /**
