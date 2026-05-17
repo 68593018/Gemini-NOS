@@ -19,8 +19,8 @@ static const nos_node_def_t g_nodes[] = {
         .name = "ProcA", .uds_path = "/tmp/nos_proc_A.sock",
         .buffer_pools = g_proca_pools,
         .threads = {
-            { .name = "Worker-1", .comp_ids = {1, 0} },
-            { .name = "Worker-2", .comp_ids = {2, 3, 5, 0} },
+            { .name = "Worker-1", .comp_ids = {1, 0}, .comp_names = {"Comp-1", NULL} },
+            { .name = "Worker-2", .comp_ids = {2, 3, 5, 0}, .comp_names = {"Comp-2", "Comp-3", "Comp-5", NULL} },
             { .name = NULL }
         }
     },
@@ -28,7 +28,7 @@ static const nos_node_def_t g_nodes[] = {
         .name = "ProcB", .uds_path = "/tmp/nos_proc_B.sock",
         .buffer_pools = g_procb_pools,
         .threads = {
-            { .name = "Worker-1", .comp_ids = {4, 0} },
+            { .name = "Worker-1", .comp_ids = {4, 0}, .comp_names = {"Comp-4", NULL} },
             { .name = NULL }
         }
     },

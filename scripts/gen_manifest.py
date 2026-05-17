@@ -74,14 +74,17 @@ def validate_and_resolve(data):
         node["resolved_bins"] = profile_map.get(pname, profile_map.get("default", []))
         
         for thread in node["threads"]:
-            resolved = []
+            resolved_ids = []
+            resolved_names = []
             for comp_name in thread["components"]:
                 cid = name_to_id.get(comp_name)
                 if cid is None:
                     print(f"Error: Unknown component '{comp_name}'"); sys.exit(1)
-                resolved.append(cid)
+                resolved_ids.append(cid)
+                resolved_names.append(comp_name)
                 comp_to_node[cid] = node["name"]
-            thread["components"] = resolved
+            thread["comp_ids"] = resolved_ids
+            thread["comp_names"] = resolved_names
             
     for svc in data["services"]:
         pname = svc["provider"]
@@ -122,7 +125,9 @@ def generate_c_code(data, output_path):
         c_content.append(f'        .buffer_pools = g_{safe_name}_pools,')
         c_content.append('        .threads = {')
         for thread in node["threads"]:
-            c_content.append(f'            {{ .name = "{thread["name"]}", .comp_ids = {{{", ".join(map(str, thread["components"]))}, 0}} }},')
+            ids_str = ", ".join(map(str, thread["comp_ids"]))
+            names_str = ", ".join(f'"{n}"' for n in thread["comp_names"])
+            c_content.append(f'            {{ .name = "{thread["name"]}", .comp_ids = {{{ids_str}, 0}}, .comp_names = {{{names_str}, NULL}} }},')
         c_content.append('            { .name = NULL }')
         c_content.append('        }')
         c_content.append('    },')

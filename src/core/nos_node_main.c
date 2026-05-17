@@ -3,6 +3,8 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <dlfcn.h>
+#include <ctype.h>
 #include "nos_component.h"
 #include "nos_service.h"
 #include "nos_scheduler.h"
@@ -10,13 +12,65 @@
 #include "nos_buffer.h"
 
 #define MAX_WORKERS 8
+#define MAX_COMPONENTS_PER_NODE 64
+
+/* 全局组件注册表 (动态加载后存放在此) */
+static nos_component_t* g_loaded_components[MAX_COMPONENTS_PER_NODE];
+static uint32_t g_loaded_count = 0;
 
 /* 外部函数声明 (由 nos_ipc_p2p.c 提供) */
 nos_status_t nos_ipc_init(nos_thread_t *thread, const char *uds_path);
 
 /* 外部函数声明 (由 nos_scheduler.c 内部提供) */
 nos_status_t nos_service_register_provider_bind(uint32_t service_id, nos_component_t *provider, nos_thread_t *thread);
-nos_component_t* nos_get_component_by_id(uint32_t id);
+
+/**
+ * @brief 动态加载组件 .so
+ */
+static nos_component_t* node_load_component(uint32_t id, const char *name) {
+    char lib_path[256];
+    char lower_name[64];
+    
+    /* 转换名称为小写用于匹配文件名: Comp-1 -> libcomp-1.so */
+    for (int i = 0; name[i]; i++) lower_name[i] = tolower(name[i]);
+    lower_name[strlen(name)] = '\0';
+    sprintf(lib_path, "./lib%s.so", lower_name);
+
+    void *handle = dlopen(lib_path, RTLD_NOW);
+    if (!handle) {
+        fprintf(stderr, "[Node] Failed to load %s: %s\n", lib_path, dlerror());
+        return NULL;
+    }
+
+    nos_comp_export_func_t export_func = (nos_comp_export_func_t)dlsym(handle, "nos_export_component");
+    if (!export_func) {
+        fprintf(stderr, "[Node] Symbol 'nos_export_component' not found in %s\n", lib_path);
+        dlclose(handle);
+        return NULL;
+    }
+
+    nos_component_t *comp = calloc(1, sizeof(nos_component_t));
+    comp->id = id;
+    comp->name = strdup(name);
+
+    if (export_func(comp) != NOS_OK) {
+        fprintf(stderr, "[Node] Component %s export failed\n", name);
+        free((void*)comp->name);
+        free(comp);
+        dlclose(handle);
+        return NULL;
+    }
+
+    printf("[Node] Successfully loaded dynamic component: %s (ID:%u) from %s\n", name, id, lib_path);
+    return comp;
+}
+
+static nos_component_t* node_get_loaded_comp_by_id(uint32_t id) {
+    for (uint32_t i = 0; i < g_loaded_count; i++) {
+        if (g_loaded_components[i]->id == id) return g_loaded_components[i];
+    }
+    return NULL;
+}
 
 static void* scheduler_thread_entry(void *arg) {
     nos_scheduler_run_loop((nos_thread_t *)arg);
@@ -47,8 +101,12 @@ static int node_init_workers(const nos_node_def_t *node_def, nos_thread_t *worke
         
         /* 将组件加载到具体的工作线程 */
         for (int j = 0; t_def->comp_ids[j] != 0; j++) {
-            nos_component_t *comp = nos_get_component_by_id(t_def->comp_ids[j]);
+            /* 动态加载组件 */
+            nos_component_t *comp = node_load_component(t_def->comp_ids[j], t_def->comp_names[j]);
             if (comp) {
+                if (g_loaded_count < MAX_COMPONENTS_PER_NODE) {
+                    g_loaded_components[g_loaded_count++] = comp;
+                }
                 nos_scheduler_register_component(&worker_threads[i], comp);
                 printf("[Node] DataPlane: Loaded %s onto %s\n", comp->name, t_def->name);
             }
@@ -69,7 +127,7 @@ static void node_setup_routing(const char *current_node_name, nos_thread_t *work
         const nos_service_def_t *svc = &svc_list[i];
         if (strcmp(svc->node_name, current_node_name) == 0) {
             /* 本地服务路由：定位 Provider 所在的线程 */
-            nos_component_t *provider = nos_get_component_by_id(svc->provider_comp_id);
+            nos_component_t *provider = node_get_loaded_comp_by_id(svc->provider_comp_id);
             nos_thread_t *owner_worker = NULL;
             for (int t = 0; t < worker_count; t++) {
                 for (uint32_t c = 0; c < worker_threads[t].component_count; c++) {

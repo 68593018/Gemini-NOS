@@ -1,16 +1,14 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "nos_component.h"
 #include "nos_service.h"
 #include "nos_buffer.h"
-#include "nos_ids.h"  /* 引入自动生成的 ID 宏 */
 
 #define MAX_ITERATIONS 10
+static int counter = 0;
 
-static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
-    static int counter = 0;
+static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     const char *payload = (const char *)((uint8_t *)msg + sizeof(nos_service_msg_t));
     printf("[%s] RECEIVED: From Component %u, MsgCode %u, Payload: %s\n", 
            self->name, msg->src_component, msg->msg_code, payload);
@@ -54,18 +52,9 @@ static void generic_on_msg(nos_component_t *self, const nos_service_msg_t *msg) 
     }
 }
 
-/* 使用宏定义组件 ID，确保与 YAML 强一致 */
-static nos_component_t g_comp1 = { .id = COMP_1, .name = "Comp-1", .on_msg = generic_on_msg };
-static nos_component_t g_comp2 = { .id = COMP_2, .name = "Comp-2", .on_msg = generic_on_msg };
-static nos_component_t g_comp3 = { .id = COMP_3, .name = "Comp-3", .on_msg = generic_on_msg };
-static nos_component_t g_comp4 = { .id = COMP_4, .name = "Comp-4", .on_msg = generic_on_msg };
-static nos_component_t g_comp5 = { .id = COMP_5, .name = "Comp-5", .on_msg = generic_on_msg };
-
-static nos_component_t* g_registry[] = { &g_comp1, &g_comp2, &g_comp3, &g_comp4, &g_comp5 };
-
-nos_component_t* nos_get_component_by_id(uint32_t id) {
-    for (size_t i = 0; i < sizeof(g_registry)/sizeof(g_registry[0]); i++) {
-        if (g_registry[i]->id == id) return g_registry[i];
-    }
-    return NULL;
+nos_status_t nos_export_component(nos_component_t *comp) {
+    if (!comp) return NOS_ERR;
+    comp->on_msg = comp_on_msg;
+    printf("[LibComp] Component '%s' (ID:%u) exported.\n", comp->name, comp->id);
+    return NOS_OK;
 }

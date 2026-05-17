@@ -45,4 +45,11 @@ typedef struct nos_component_s {
 
 } nos_component_t;
 
+/**
+ * @brief 组件导出函数类型
+ * 组件 .so 必须实现一个名为 "nos_export_component" 的函数。
+ * 平台进程在 dlopen 后通过 dlsym 调用此函数。
+ */
+typedef nos_status_t (*nos_comp_export_func_t)(nos_component_t *comp);
+
 #endif /* __NOS_COMPONENT_H__ */
