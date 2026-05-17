@@ -8,6 +8,19 @@
 #include "nos_node_mgr.h"
 #include "nos_manifest.h"
 
+/* --- CLI 历史记录管理 --- */
+#define MAX_HISTORY 3
+static char g_history[MAX_HISTORY][256];
+static int  g_history_count = 0;
+
+static void history_add(const char *cmd) {
+    if (!cmd || strlen(cmd) == 0) return;
+    if (g_history_count > 0 && strcmp(g_history[0], cmd) == 0) return;
+    for (int i = MAX_HISTORY - 1; i > 0; i--) strcpy(g_history[i], g_history[i-1]);
+    strncpy(g_history[0], cmd, 255);
+    if (g_history_count < MAX_HISTORY) g_history_count++;
+}
+
 /* --- 命令处理函数声明 --- */
 static void do_help(const char *args);
 static void do_quit(const char *args);
@@ -18,16 +31,12 @@ static void do_load(const char *args);
 static void do_unload(const char *args);
 static void do_reload(const char *args);
 
-/**
- * @brief CLI 命令定义结构
- */
 typedef struct {
     const char *name;
     const char *help;
     void (*handler)(const char *args);
 } nos_cli_cmd_t;
 
-/* --- 命令分发表 --- */
 static nos_cli_cmd_t g_cli_cmds[] = {
     {"help",            "Show this help message",           do_help},
     {"show components", "List all loaded components",       do_show_components},
@@ -40,8 +49,6 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {NULL, NULL, NULL}
 };
 
-/* --- 辅助工具函数 --- */
-
 static const char* comp_status_str(nos_comp_status_t st) {
     switch(st) {
         case NOS_COMP_ST_LOADED:  return "Loaded";
@@ -53,28 +60,20 @@ static const char* comp_status_str(nos_comp_status_t st) {
     }
 }
 
-/* --- 命令处理函数实现 --- */
-
 static void do_help(const char *args) {
     printf("\n--- NOS Node CLI Commands ---\n");
-    for (int i = 0; g_cli_cmds[i].name; i++) {
-        printf("  %-18s - %s\n", g_cli_cmds[i].name, g_cli_cmds[i].help);
-    }
+    for (int i = 0; g_cli_cmds[i].name; i++) printf("  %-18s - %s\n", g_cli_cmds[i].name, g_cli_cmds[i].help);
     printf("-----------------------------\n");
 }
 
-static void do_quit(const char *args) {
-    g_node_ctx.keep_running = 0;
-}
+static void do_quit(const char *args) { g_node_ctx.keep_running = 0; }
 
 static void do_show_components(const char *args) {
     printf("\n%-15s %-4s %-10s %-15s %-12s\n", "Name", "ID", "Status", "Model-Lib", "Thread");
     printf("----------------------------------------------------------------------\n");
     for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
         loaded_comp_info_t *info = &g_node_ctx.loaded_info[i];
-        printf("%-15s %-4u %-10s %-15s %-12s\n", 
-               info->comp->name, info->comp->id, comp_status_str(info->comp->status), 
-               info->lib_name, info->owner_thread->name);
+        printf("%-15s %-4u %-10s %-15s %-12s\n", info->comp->name, info->comp->id, comp_status_str(info->comp->status), info->lib_name, info->owner_thread->name);
     }
 }
 
@@ -84,136 +83,68 @@ static void do_show_services(const char *args) {
     printf("----------------------------------------------------------------------\n");
     for (uint32_t i = 0; i < node->service_count; i++) {
         const nos_service_def_t *svc = &node->services[i];
-        const char *location = "Remote";
-        if (strcmp(svc->node_name, "Platform") == 0) {
-            location = "Embedded";
-        } else if (strcmp(svc->node_name, node->name) == 0) {
-            location = "Local";
-        }
-        printf("%-18s %-8u %-10s %-8u %-10s\n", 
-               svc->service_name, svc->service_id, svc->node_name, 
-               svc->provider_comp_id, location);
+        const char *loc = (strcmp(svc->node_name, "Platform") == 0) ? "Embedded" : (strcmp(svc->node_name, node->name) == 0) ? "Local" : "Remote";
+        printf("%-18s %-8u %-10s %-8u %-10s\n", svc->service_name, svc->service_id, svc->node_name, svc->provider_comp_id, loc);
     }
 }
 
-static void do_show_db(const char *args) {
-    extern void nos_kv_dump_all(void);
-    nos_kv_dump_all();
-}
-
-static void do_load(const char *args) {
-    if (!args || strlen(args) == 0) {
-        printf("Usage: load <comp_name>\n");
-        return;
-    }
-    node_reload_component(args);
-}
-
-static void do_reload(const char *args) {
-    if (!args || strlen(args) == 0) {
-        printf("Usage: reload <comp_name>\n");
-        return;
-    }
-    node_reload_component(args);
-}
-
-static void do_unload(const char *args) {
-    if (!args || strlen(args) == 0) {
-        printf("Usage: unload <comp_name>\n");
-        return;
-    }
-    node_unload_component(args);
-}
-
-/* --- CLI 交互核心逻辑 (Tab 补全与循环) --- */
+static void do_show_db(const char *args) { extern void nos_kv_dump_all(void); nos_kv_dump_all(); }
+static void do_load(const char *args) { if (args) node_reload_component(args); }
+static void do_reload(const char *args) { if (args) node_reload_component(args); }
+static void do_unload(const char *args) { if (args) node_unload_component(args); }
 
 static int advanced_get_line(char *buf, int size, const char *prompt) {
     struct termios oldt, newt;
-    int pos = 0;
-    char c;
-
-    printf("%s", prompt);
-    fflush(stdout);
-
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    int pos = 0; char c; int h_idx = -1;
+    printf("%s", prompt); fflush(stdout);
+    tcgetattr(STDIN_FILENO, &oldt); newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO); tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
     while (pos < size - 1) {
         if (read(STDIN_FILENO, &c, 1) <= 0) { pos = -1; break; }
-
-        if (c == '\n' || c == '\r') {
-            buf[pos] = '\0'; printf("\n"); break;
-        } else if (c == 127 || c == 8) { /* Backspace */
-            if (pos > 0) { pos--; printf("\b \b"); fflush(stdout); }
-        } else if (c == '\t') { /* Tab 补全逻辑 */
-            buf[pos] = '\0';
-            int matches = 0, last_idx = -1;
-            for (int i = 0; g_cli_cmds[i].name; i++) {
-                if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) {
-                    matches++; last_idx = i;
+        if (c == '\n' || c == '\r') { buf[pos] = '\0'; printf("\n"); break; }
+        else if (c == 27) {
+            char seq[3]; if (read(STDIN_FILENO, &seq[0], 1) <= 0) break; if (read(STDIN_FILENO, &seq[1], 1) <= 0) break;
+            if (seq[0] == '[' && seq[1] == 'A') {
+                if (g_history_count > 0 && h_idx < g_history_count - 1) {
+                    h_idx++; printf("\r%s\033[K%s", prompt, g_history[h_idx]);
+                    strcpy(buf, g_history[h_idx]); pos = strlen(buf);
                 }
             }
-            if (matches == 1) {
-                printf("%s", g_cli_cmds[last_idx].name + pos);
-                strcpy(buf + pos, g_cli_cmds[last_idx].name + pos);
-                pos = strlen(buf);
-            } else if (matches > 1) {
-                printf("\n");
-                for (int i = 0; g_cli_cmds[i].name; i++) {
-                    if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) printf("%s  ", g_cli_cmds[i].name);
-                }
+        } else if (c == 127 || c == 8) {
+            if (pos > 0) { pos--; printf("\b \b"); }
+        } else if (c == '\t') {
+            buf[pos] = '\0'; int matches = 0, last = -1;
+            for (int i = 0; g_cli_cmds[i].name; i++) if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) { matches++; last = i; }
+            if (matches == 1) { printf("%s", g_cli_cmds[last].name + pos); strcpy(buf + pos, g_cli_cmds[last].name + pos); pos = strlen(buf); }
+            else if (matches > 1) {
+                printf("\n"); for (int i = 0; g_cli_cmds[i].name; i++) if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) printf("%s  ", g_cli_cmds[i].name);
                 printf("\n%s%s", prompt, buf);
             }
-            fflush(stdout);
-        } else {
-            buf[pos++] = c; printf("%c", c); fflush(stdout);
-        }
+        } else { buf[pos++] = c; printf("%c", c); }
+        fflush(stdout);
     }
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    return pos;
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt); return pos;
 }
 
 static void* node_cli_thread_entry(void *arg) {
-    char cmd_buf[256];
-    char prompt[64];
-    int is_tty = isatty(STDIN_FILENO);
+    char buf[256], prompt[64]; int is_tty = isatty(STDIN_FILENO);
     sprintf(prompt, "nos-node(%s)> ", (char*)arg);
-
-    if (is_tty) printf("[CLI] Management interface started. (Tab for completion)\n");
-
+    if (is_tty) printf("[CLI] Management interface started. (Tab for completion, Up for history)\n");
     while (g_node_ctx.keep_running) {
-        int len;
-        if (is_tty) {
-            len = advanced_get_line(cmd_buf, sizeof(cmd_buf), prompt);
-        } else {
-            if (!fgets(cmd_buf, sizeof(cmd_buf), stdin)) break;
-            cmd_buf[strcspn(cmd_buf, "\n")] = 0;
-            len = strlen(cmd_buf);
-        }
-
-        if (len < 0) break;
-        if (len == 0) continue;
-
-        /* 命令分发逻辑 */
+        int len = is_tty ? advanced_get_line(buf, sizeof(buf), prompt) : (fgets(buf, sizeof(buf), stdin) ? (int)strlen(buf) : -1);
+        if (len < 0) break; if (len == 0) continue;
+        if (!is_tty) buf[strcspn(buf, "\n")] = 0;
+        history_add(buf);
         int found = 0;
         for (int i = 0; g_cli_cmds[i].name; i++) {
-            int name_len = strlen(g_cli_cmds[i].name);
-            /* 匹配完整命令名或以命令名开头的带参数指令 */
-            if (strcmp(cmd_buf, g_cli_cmds[i].name) == 0 || 
-               (strncmp(cmd_buf, g_cli_cmds[i].name, name_len) == 0 && cmd_buf[name_len] == ' ')) {
-                
-                const char *args = (cmd_buf[name_len] == ' ') ? (cmd_buf + name_len + 1) : NULL;
-                g_cli_cmds[i].handler(args);
-                found = 1;
-                break;
+            int nlen = strlen(g_cli_cmds[i].name);
+            if (strcmp(buf, g_cli_cmds[i].name) == 0 || (strncmp(buf, g_cli_cmds[i].name, nlen) == 0 && buf[nlen] == ' ')) {
+                g_cli_cmds[i].handler((buf[nlen] == ' ') ? (buf + nlen + 1) : NULL);
+                found = 1; break;
             }
         }
-
-        if (!found && is_tty) {
-            printf("Unknown command: %s. Type 'help' for support.\n", cmd_buf);
-        }
+        if (!found && is_tty) printf("Unknown command: %s\n", buf);
     }
     return NULL;
 }
