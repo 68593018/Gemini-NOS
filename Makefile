@@ -14,6 +14,7 @@ CORE_SRCS = src/core/nos_scheduler.c \
             src/infra/nos_ipc_p2p.c \
             src/infra/log/nos_log.c \
             src/infra/db/nos_kv.c \
+            src/infra/timer/nos_timer.c \
             src/core/nos_node_main.c
 
 # 将核心源码转换为 .o

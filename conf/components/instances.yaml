@@ -2,6 +2,7 @@ platform:
   provides:
     - { name: "SVC_LOG", id: 1, type: "embedded" }
     - { name: "SVC_KV_DB", id: 2, type: "embedded" }
+    - { name: "SVC_TIMER", id: 3, type: "embedded" }
 
 components:
   - name: "Comp-1"
@@ -13,6 +14,7 @@ components:
       - "SVC_LOG"
       - "SVC_ROUTING_V4"
       - "SVC_ROUTING_V6"
+      - "SVC_TIMER"
 
   - name: "Comp-2"
     model: "Model2"

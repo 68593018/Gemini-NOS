@@ -6,6 +6,34 @@
 #include "nos_service.h"
 #include "nos_log_api.h"
 #include "nos_kv_api.h"
+#include "nos_timer_api.h"
+
+/**
+ * @brief 内部接口：获取 Timer 操作句柄
+ */
+static inline nos_timer_ops_t* _nos_get_timer_ops(void) {
+    extern void* nos_embedded_service_get(const char *name);
+    static _Atomic(nos_timer_ops_t*) cache = NULL;
+    
+    nos_timer_ops_t* ops = atomic_load_explicit(&cache, memory_order_relaxed);
+    if (!ops) {
+        ops = (nos_timer_ops_t *)nos_embedded_service_get("SVC_TIMER");
+        if (ops) {
+            atomic_store_explicit(&cache, ops, memory_order_relaxed);
+        }
+    }
+    return ops;
+}
+
+/**
+ * @brief 自动化 Timer API
+ */
+#define nos_timer_start_auto(dst_svc_id, interval_ms, is_periodic, msg_code, out_id) \
+    ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); \
+       ops ? ops->start(interval_ms, is_periodic, dst_svc_id, msg_code, out_id) : NOS_ERR; })
+
+#define nos_timer_stop_auto(timer_id) \
+    ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); ops ? ops->stop(timer_id) : NOS_ERR; })
 
 /**
  * @brief 内部接口：获取 KV 操作句柄

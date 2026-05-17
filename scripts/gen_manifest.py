@@ -81,7 +81,7 @@ def parse_yaml_fallback(file_path):
                 data["profiles"][-1]["bins"].append(bin_data)
     return data
 
-INFRA_INIT_MAP = {"SVC_LOG": "nos_log_init", "SVC_KV_DB": "nos_kv_db_init"}
+INFRA_INIT_MAP = {"SVC_LOG": "nos_log_init", "SVC_KV_DB": "nos_kv_db_init", "SVC_TIMER": "nos_timer_init"}
 
 def validate_and_resolve(data):
     comp_map = {c["name"]: c for c in data["components"]}
