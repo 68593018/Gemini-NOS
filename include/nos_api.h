@@ -26,11 +26,43 @@ static inline nos_timer_ops_t* _nos_get_timer_ops(void) {
 }
 
 /**
- * @brief 自动化 Timer API
+ * @brief 内部辅助：定时器到期后转发消息的结构
  */
-#define nos_timer_start_auto(dst_svc_id, interval_ms, is_periodic, msg_code, out_id) \
-    ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); \
-       ops ? ops->start(interval_ms, is_periodic, dst_svc_id, msg_code, out_id) : NOS_ERR; })
+typedef struct {
+    uint32_t dst_svc;
+    uint32_t msg_code;
+    uint32_t comp_id;
+} nos_timer_msg_wrapper_t;
+
+static inline void _nos_timer_msg_callback(void *arg) {
+    nos_timer_msg_wrapper_t *w = (nos_timer_msg_wrapper_t *)arg;
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t), 0);
+    if (buf) {
+        nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+        msg->magic = NOS_IPC_MAGIC;
+        msg->dst_service = w->dst_svc;
+        msg->src_component = w->comp_id;
+        msg->msg_code = w->msg_code;
+        msg->payload_len = 0;
+        nos_service_msg_send(buf);
+        nos_buffer_release(buf);
+    }
+}
+
+static inline void _nos_timer_free_wrapper(void *arg) {
+    if (arg) free(arg);
+}
+
+/**
+ * @brief 自动化 Timer API (集成到消息流)
+ */
+#define nos_timer_start_auto(dst_svc_id, interval_ms, is_periodic, code, out_id) \
+    ({ \
+        nos_timer_msg_wrapper_t *w = malloc(sizeof(nos_timer_msg_wrapper_t)); \
+        w->dst_svc = dst_svc_id; w->msg_code = code; w->comp_id = 0; \
+        nos_timer_ops_t *ops = _nos_get_timer_ops(); \
+        ops ? ops->start(interval_ms, is_periodic, _nos_timer_msg_callback, w, _nos_timer_free_wrapper, out_id) : NOS_ERR; \
+    })
 
 #define nos_timer_stop_auto(timer_id) \
     ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); ops ? ops->stop(timer_id) : NOS_ERR; })

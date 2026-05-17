@@ -51,14 +51,6 @@ int main(int argc, char *argv[]) {
     node_init_workers(node_def);
     node_setup_routing(node_def->name);
 
-    /* 2. 触发启动生命周期 */
-    for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
-        if (g_node_ctx.loaded_info[i].comp->start) {
-            g_node_ctx.loaded_info[i].comp->start(g_node_ctx.loaded_info[i].comp);
-            g_node_ctx.loaded_info[i].comp->status = NOS_COMP_ST_ACTIVE;
-        }
-    }
-
     /* 3. 注册信号量 */
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);

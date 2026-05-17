@@ -46,6 +46,16 @@ void nos_kv_release_ptr(void *handle);
 nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key);
 
 /**
+ * @brief 打印表统计信息
+ */
+void nos_kv_table_dump(nos_kv_table_t *table);
+
+/**
+ * @brief 打印所有表的统计信息
+ */
+void nos_kv_dump_all(void);
+
+/**
  * @brief KV 服务操作接口 (API Table)
  */
 typedef struct {

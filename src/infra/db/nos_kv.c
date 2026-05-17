@@ -228,6 +228,23 @@ nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key) {
     return NOS_ERR;
 }
 
+void nos_kv_dump_all(void) {
+    pthread_mutex_lock(&g_table_mgr_lock);
+    if (g_table_count == 0) {
+        printf("No KV tables registered.\n");
+    } else {
+        printf("\n%-15s %-8s %-8s %-10s %-8s\n", "Table", "KeySize", "MaxVal", "Capacity", "Used");
+        printf("------------------------------------------------------------\n");
+        for (int i = 0; i < g_table_count; i++) {
+            nos_kv_table_t *t = g_tables[i];
+            printf("%-15s %-8u %-8u %-10u %-8u (%.1f%%)\n", 
+                   t->name, t->key_size, t->max_val_size, t->capacity, t->used_count,
+                   (float)t->used_count * 100 / t->capacity);
+        }
+    }
+    pthread_mutex_unlock(&g_table_mgr_lock);
+}
+
 void nos_kv_table_dump(nos_kv_table_t *table) {
     if (!table) return;
     nos_sys_log_info("KV Table '%s' Stats: Capacity=%u, Used=%u (%.1f%%)", 

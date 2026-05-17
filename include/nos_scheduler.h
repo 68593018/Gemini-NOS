@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include "nos_component.h"
 #include "nos_buffer.h"
+#include "nos_timer_api.h"
 
 /**
  * @brief 文件描述符事件回调
@@ -15,6 +16,28 @@ typedef struct {
     nos_fd_callback_t callback;
     void *arg;
 } nos_fd_entry_t;
+
+/**
+ * @brief 定时器节点定义
+ */
+typedef struct {
+    uint32_t timer_id;
+    uint64_t expire_at_ms;
+    uint32_t interval_ms;
+    int      is_periodic;
+    nos_timer_cb_t callback;
+    nos_timer_free_arg_t free_arg;
+    void    *arg;
+} nos_timer_node_t;
+
+/**
+ * @brief 定时器最小堆
+ */
+typedef struct {
+    nos_timer_node_t **nodes;
+    uint32_t           size;
+    uint32_t           capacity;
+} nos_timer_heap_t;
 
 /**
  * @brief 调度器线程对象
@@ -36,6 +59,8 @@ typedef struct nos_thread_s {
     nos_fd_entry_t *fd_entries;
     uint32_t fd_count;
 
+    nos_timer_heap_t timer_heap; /**< 本地定时器堆 */
+
     /**
      * @brief 启动调度循环
      */
@@ -54,11 +79,6 @@ nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_
 nos_status_t nos_scheduler_remove_fd(nos_thread_t *thread, int fd);
 
 /**
- * @brief 向系统注册一个服务提供者
- */
-nos_status_t nos_service_register_provider(uint32_t service_id, nos_component_t *provider);
-
-/**
  * @brief 注册组件到线程调度器
  */
 nos_status_t nos_scheduler_register_component(nos_thread_t *thread, nos_component_t *comp);
@@ -69,13 +89,7 @@ nos_status_t nos_scheduler_register_component(nos_thread_t *thread, nos_componen
 nos_status_t nos_scheduler_unregister_component(nos_thread_t *thread, nos_component_t *comp);
 
 /**
- * @brief 注销服务提供者
- */
-nos_status_t nos_service_unregister_provider(uint32_t service_id);
-
-/**
- * @brief 向调度器注册外部 FD
-
+ * @brief 启动调度循环
  */
 nos_status_t nos_scheduler_run_loop(nos_thread_t *self);
 

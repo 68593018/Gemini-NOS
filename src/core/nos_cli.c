@@ -13,8 +13,10 @@ static void do_help(const char *args);
 static void do_quit(const char *args);
 static void do_show_components(const char *args);
 static void do_show_services(const char *args);
+static void do_show_db(const char *args);
 static void do_load(const char *args);
 static void do_unload(const char *args);
+static void do_reload(const char *args);
 
 /**
  * @brief CLI 命令定义结构
@@ -30,8 +32,10 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {"help",            "Show this help message",           do_help},
     {"show components", "List all loaded components",       do_show_components},
     {"show services",   "List all service routes",         do_show_services},
-    {"load",            "Load/Reload a component by name",  do_load},
+    {"show db",         "List all KV tables status",        do_show_db},
+    {"load",            "Load a component by name",         do_load},
     {"unload",          "Unload a component by name",       do_unload},
+    {"reload",          "Reload a component (Stateless check)", do_reload},
     {"quit",            "Shutdown the node",                do_quit},
     {NULL, NULL, NULL}
 };
@@ -92,9 +96,22 @@ static void do_show_services(const char *args) {
     }
 }
 
+static void do_show_db(const char *args) {
+    extern void nos_kv_dump_all(void);
+    nos_kv_dump_all();
+}
+
 static void do_load(const char *args) {
     if (!args || strlen(args) == 0) {
         printf("Usage: load <comp_name>\n");
+        return;
+    }
+    node_reload_component(args);
+}
+
+static void do_reload(const char *args) {
+    if (!args || strlen(args) == 0) {
+        printf("Usage: reload <comp_name>\n");
         return;
     }
     node_reload_component(args);
