@@ -13,31 +13,36 @@ CORE_SRCS = src/core/nos_scheduler.c \
             src/infra/nos_ipc_p2p.c \
             src/core/nos_node_main.c
 
-# 组件源码与目标库 (保持不变)
-COMP_SRCS = $(wildcard src/components/comp_*.c)
-COMP_LIBS = $(patsubst src/components/comp_%.c, libcomp-%.so, $(COMP_SRCS))
+# 组件定义
+COMP_LIBS = libcomp-1.so libcomp-2.so libcomp-3.so libcomp-4.so libcomp-5.so
 
 # 默认目标
 all: include/nos_ids.h $(COMP_LIBS) nos_ProcA nos_ProcB
 
-# 生成全局 ID 头文件并打印出节点列表
+# 生成全局 ID 头文件
 include/nos_ids.h: $(shell find $(CONFIG_DIR) -name "*.yaml") $(GEN_SCRIPT)
 	@echo "Generating manifests and ID headers..."
 	@$(PYTHON) $(GEN_SCRIPT) $(CONFIG_DIR) include/nos_ids.h
 
-# 编译 ProcA 二进制 (链接特定的 manifest_ProcA.c)
+# 编译各节点二进制
 nos_ProcA: $(CORE_SRCS) src/core/manifest_ProcA.c include/nos_ids.h
 	@echo "Building binary for node ProcA..."
 	@$(CC) $(CFLAGS) $(CORE_SRCS) src/core/manifest_ProcA.c -o $@ $(LDFLAGS)
 
-# 编译 ProcB 二进制 (链接特定的 manifest_ProcB.c)
 nos_ProcB: $(CORE_SRCS) src/core/manifest_ProcB.c include/nos_ids.h
 	@echo "Building binary for node ProcB..."
 	@$(CC) $(CFLAGS) $(CORE_SRCS) src/core/manifest_ProcB.c -o $@ $(LDFLAGS)
 
-# 组件编译规则
-libcomp-%.so: src/components/comp_%.c
-	@echo "Building component library $@..."
+# 组件编译规则 (手动指定以确保 100% 正确)
+libcomp-1.so: src/components/model_1/model_1.c
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-2.so: src/components/model_2/model_2.c
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-3.so: src/components/model_3/model_3.c
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-4.so: src/components/model_4/model_4.c
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-5.so: src/components/model_5/model_5.c
 	@$(CC) $(CFLAGS) -shared $< -o $@
 
 clean:

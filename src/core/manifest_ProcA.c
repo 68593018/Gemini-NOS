@@ -9,8 +9,8 @@ static const nos_buffer_pool_def_t g_local_pools[] = {
 };
 static const nos_service_def_t g_local_services[] = {
     { .service_id = 105, .node_name = "ProcA", .provider_comp_id = 5, .remote_uds_path = "/tmp/nos_proc_A.sock" },
-    { .service_id = 102, .node_name = "ProcA", .provider_comp_id = 2, .remote_uds_path = "/tmp/nos_proc_A.sock" },
     { .service_id = 204, .node_name = "ProcB", .provider_comp_id = 4, .remote_uds_path = "/tmp/nos_proc_B.sock" },
+    { .service_id = 102, .node_name = "ProcA", .provider_comp_id = 2, .remote_uds_path = "/tmp/nos_proc_A.sock" },
     { .service_id = 101, .node_name = "ProcA", .provider_comp_id = 1, .remote_uds_path = "/tmp/nos_proc_A.sock" },
     { .service_id = 0 }
 };
