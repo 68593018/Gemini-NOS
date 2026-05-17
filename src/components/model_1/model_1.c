@@ -60,8 +60,8 @@ static nos_status_t comp_start(nos_component_t *self) {
     
     /* 2. 启动定时器 */
     if (ctx->heartbeat_timer) {
-        nos_timer_start_auto(self, ctx->heartbeat_timer, 3000, 1);
-        nos_log_info(self, "Heartbeat timer object created and started (3s)");
+        nos_timer_start_auto(self, ctx->heartbeat_timer, 10000, 1);
+        nos_log_info(self, "Heartbeat timer object created and started (10s)");
     }
     return NOS_OK;
 }

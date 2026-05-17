@@ -9,6 +9,7 @@
 
 typedef struct {
     nos_kv_table_t *state_table;
+    nos_kv_table_t *test_table;
     int local_counter;
 } comp_ctx_t;
 
@@ -17,10 +18,18 @@ static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     if (!ctx) return;
     
     ctx->local_counter++;
+    
+    /* 1. 同步组件运行状态 (Key 是字符串名称) */
     if (ctx->state_table) {
         nos_kv_put_auto(ctx->state_table, self->name, &ctx->local_counter, sizeof(int));
     }
-    nos_log_info(self, "Msg received, counter updated to: %d (Stateless Sync)", ctx->local_counter);
+
+    /* 2. 写入测试数据 (Key 和 Value 都是当前的 counter) */
+    if (ctx->test_table) {
+        nos_kv_put_auto(ctx->test_table, &ctx->local_counter, &ctx->local_counter, sizeof(int));
+    }
+    
+    nos_log_info(self, "Msg received, counter: %d. Data synced to KV DB.", ctx->local_counter);
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
@@ -28,14 +37,20 @@ static nos_status_t comp_init(nos_component_t *self) {
     if (!ctx) return NOS_ERR;
     self->priv = ctx;
 
+    /* 初始化状态表 (KeySize=32 支持字符串名称) */
     ctx->state_table = nos_kv_table_create_auto("CompStates", 32, sizeof(int), 128);
+    
+    /* 初始化测试数据表 (KeySize=4 适配 int 类型 Key) */
+    ctx->test_table = nos_kv_table_create_auto("TestData", sizeof(int), sizeof(int), 1024);
+
+    /* 恢复状态 */
     if (ctx->state_table) {
         uint32_t len = sizeof(int);
         if (nos_kv_get_auto(ctx->state_table, self->name, &ctx->local_counter, &len) == NOS_OK) {
             nos_log_info(self, "State recovered from KV DB: counter = %d", ctx->local_counter);
         }
     }
-    nos_log_debug(self, "Component instance isolated and initialized");
+    nos_log_debug(self, "Component instance with multiple KV tables initialized");
     return NOS_OK;
 }
 
