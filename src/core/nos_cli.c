@@ -139,23 +139,16 @@ static void* node_cli_thread_entry(void *arg) {
         } else if (strcmp(cmd_buf, "show services") == 0) {
             uint32_t count = 0;
             const nos_service_def_t *svc_list = nos_manifest_get_services(&count);
-            printf("\n%-8s %-15s %-8s %-10s\n", "Svc-ID", "Node", "Comp-ID", "Status");
+            printf("\n%-8s %-15s %-8s %-10s\n", "Svc-ID", "Node", "Comp-ID", "Location");
             printf("----------------------------------------------------------\n");
             for (uint32_t i = 0; i < count; i++) {
-                const char *status = "Offline";
+                const char *location = "Remote";
                 if (strcmp(svc_list[i].node_name, current_node) == 0) {
-                    for (uint32_t j = 0; j < g_node_ctx.loaded_count; j++) {
-                        if (g_node_ctx.loaded_info[j].comp->id == svc_list[i].provider_comp_id) {
-                            status = (g_node_ctx.loaded_info[j].comp->status == NOS_COMP_ST_ACTIVE) ? "Active" : "Inactive";
-                            break;
-                        }
-                    }
-                } else {
-                    status = "Remote";
+                    location = "Local";
                 }
                 printf("%-8u %-15s %-8u %-10s\n", 
                        svc_list[i].service_id, svc_list[i].node_name, 
-                       svc_list[i].provider_comp_id, status);
+                       svc_list[i].provider_comp_id, location);
             }
         } else if (strncmp(cmd_buf, "unload ", 7) == 0) {
             node_unload_component(cmd_buf + 7);

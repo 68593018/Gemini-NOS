@@ -32,13 +32,25 @@ typedef struct {
 } nos_node_def_t;
 
 /**
- * @brief 全局服务拓扑定义
+ * @brief 服务运行状态 (预留)
+ */
+typedef enum {
+    NOS_SVC_ST_UNKNOWN,
+    NOS_SVC_ST_ACTIVE,
+    NOS_SVC_ST_INACTIVE,
+    NOS_SVC_ST_ERROR
+} nos_service_status_t;
+
+/**
+ * @brief 服务定义
  */
 typedef struct {
-    uint32_t service_id;    /**< 服务 ID */
-    const char *node_name;  /**< 该服务所在的进程名 */
+    uint32_t service_id;    /**< 服务逻辑 ID */
+    const char *node_name;  /**< 提供该服务的节点名称 */
     uint32_t provider_comp_id; /**< 提供该服务的组件 ID */
+    nos_service_status_t status; /**< 服务当前状态 (预留) */
 } nos_service_def_t;
+
 
 /**
  * @brief 获取节点定义
