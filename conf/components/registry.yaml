@@ -1,11 +1,28 @@
+models:
+  - name: "Model1"
+    lib: "libcomp-1.so"
+  - name: "Model2"
+    lib: "libcomp-2.so"
+  - name: "Model3"
+    lib: "libcomp-3.so"
+  - name: "Model4"
+    lib: "libcomp-4.so"
+  - name: "Model5"
+    lib: "libcomp-5.so"
+
 components:
   - name: "Comp-1"
+    model: "Model1"
     id: 1
   - name: "Comp-2"
+    model: "Model2"
     id: 2
   - name: "Comp-3"
+    model: "Model3"
     id: 3
   - name: "Comp-4"
+    model: "Model4"
     id: 4
   - name: "Comp-5"
+    model: "Model2"
     id: 5

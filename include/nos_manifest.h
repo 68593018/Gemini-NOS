@@ -10,6 +10,7 @@ typedef struct {
     const char *name;       /**< 线程名称 */
     uint32_t comp_ids[16];  /**< 分配给该线程的组件 ID 列表 (0 结束) */
     const char *comp_names[16]; /**< 组件名称列表 (用于动态加载) */
+    const char *comp_models[16]; /**< 组件模型对应的库文件名 (用于 dlopen) */
 } nos_thread_def_t;
 
 /**

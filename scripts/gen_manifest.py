@@ -13,7 +13,7 @@ def to_c_macro(name):
     return re.sub(r'[^a-zA-Z0-9]', '_', name).upper()
 
 def parse_yaml_fallback(file_path):
-    data = {"nodes": [], "services": [], "components": [], "profiles": []}
+    data = {"nodes": [], "services": [], "components": [], "profiles": [], "models": []}
     if not os.path.exists(file_path): return data
     with open(file_path, 'r') as f:
         lines = f.readlines()
@@ -27,6 +27,7 @@ def parse_yaml_fallback(file_path):
         if content == "services:": mode = "services"; continue
         if content == "components:": mode = "components"; continue
         if content == "profiles:": mode = "profiles"; continue
+        if content == "models:": mode = "models"; continue
         
         if mode == "nodes":
             if content.startswith("- name:"):
@@ -47,9 +48,16 @@ def parse_yaml_fallback(file_path):
                 data["services"][-1]["provider"] = content.split(":")[1].strip().strip('"')
         elif mode == "components":
             if content.startswith("- name:"):
-                data["components"].append({"name": content.split(":")[1].strip().strip('"')})
+                data["components"].append({"name": content.split(":")[1].strip().strip('"'), "model": ""})
             elif "id:" in content:
                 data["components"][-1]["id"] = int(content.split(":")[1].strip())
+            elif "model:" in content:
+                data["components"][-1]["model"] = content.split(":")[1].strip().strip('"')
+        elif mode == "models":
+            if content.startswith("- name:"):
+                data["models"].append({"name": content.split(":")[1].strip().strip('"'), "lib": ""})
+            elif "lib:" in content:
+                data["models"][-1]["lib"] = content.split(":")[1].strip().strip('"')
         elif mode == "profiles":
             if content.startswith("- name:"):
                 data["profiles"].append({"name": content.split(":")[1].strip().strip('"'), "bins": []})
@@ -65,6 +73,8 @@ def parse_yaml_fallback(file_path):
 
 def validate_and_resolve(data):
     name_to_id = {c["name"]: c["id"] for c in data["components"]}
+    name_to_model = {c["name"]: c["model"] for c in data["components"]}
+    model_to_lib = {m["name"]: m["lib"] for m in data["models"]}
     profile_map = {p["name"]: p["bins"] for p in data["profiles"]}
     comp_to_node = {}
     
@@ -76,15 +86,25 @@ def validate_and_resolve(data):
         for thread in node["threads"]:
             resolved_ids = []
             resolved_names = []
+            resolved_libs = []
             for comp_name in thread["components"]:
                 cid = name_to_id.get(comp_name)
+                mname = name_to_model.get(comp_name)
+                lib = model_to_lib.get(mname)
+                
                 if cid is None:
                     print(f"Error: Unknown component '{comp_name}'"); sys.exit(1)
+                if lib is None:
+                    print(f"Error: No library defined for model '{mname}' (Comp: {comp_name})"); sys.exit(1)
+                    
                 resolved_ids.append(cid)
                 resolved_names.append(comp_name)
+                resolved_libs.append(lib)
                 comp_to_node[cid] = node["name"]
+                
             thread["comp_ids"] = resolved_ids
             thread["comp_names"] = resolved_names
+            thread["comp_libs"] = resolved_libs
             
     for svc in data["services"]:
         pname = svc["provider"]
@@ -127,7 +147,8 @@ def generate_c_code(data, output_path):
         for thread in node["threads"]:
             ids_str = ", ".join(map(str, thread["comp_ids"]))
             names_str = ", ".join(f'"{n}"' for n in thread["comp_names"])
-            c_content.append(f'            {{ .name = "{thread["name"]}", .comp_ids = {{{ids_str}, 0}}, .comp_names = {{{names_str}, NULL}} }},')
+            libs_str = ", ".join(f'"{l}"' for l in thread["comp_libs"])
+            c_content.append(f'            {{ .name = "{thread["name"]}", .comp_ids = {{{ids_str}, 0}}, .comp_names = {{{names_str}, NULL}}, .comp_models = {{{libs_str}, NULL}} }},')
         c_content.append('            { .name = NULL }')
         c_content.append('        }')
         c_content.append('    },')
@@ -147,7 +168,7 @@ if __name__ == "__main__":
         print("Usage: python3 gen_manifest.py <input_dir> <output.c> <output.h>")
         sys.exit(1)
     input_dir, out_c, out_h = sys.argv[1], sys.argv[2], sys.argv[3]
-    master = {"nodes": [], "services": [], "components": [], "profiles": []}
+    master = {"nodes": [], "services": [], "components": [], "profiles": [], "models": []}
     for r, ds, files in os.walk(input_dir):
         for f in files:
             if f.endswith(".yaml"):

@@ -27,14 +27,11 @@ nos_status_t nos_service_register_provider_bind(uint32_t service_id, nos_compone
 /**
  * @brief 动态加载组件 .so
  */
-static nos_component_t* node_load_component(uint32_t id, const char *name) {
+static nos_component_t* node_load_component(uint32_t id, const char *name, const char *lib_name) {
     char lib_path[256];
-    char lower_name[64];
     
-    /* 转换名称为小写用于匹配文件名: Comp-1 -> libcomp-1.so */
-    for (int i = 0; name[i]; i++) lower_name[i] = tolower(name[i]);
-    lower_name[strlen(name)] = '\0';
-    sprintf(lib_path, "./lib%s.so", lower_name);
+    /* 构造库路径，直接使用清单中定义的 lib_name */
+    sprintf(lib_path, "./%s", lib_name);
 
     void *handle = dlopen(lib_path, RTLD_NOW);
     if (!handle) {
@@ -61,7 +58,7 @@ static nos_component_t* node_load_component(uint32_t id, const char *name) {
         return NULL;
     }
 
-    printf("[Node] Successfully loaded dynamic component: %s (ID:%u) from %s\n", name, id, lib_path);
+    printf("[Node] Successfully loaded dynamic component: %s (ID:%u) using Model Lib: %s\n", name, id, lib_name);
     return comp;
 }
 
@@ -101,8 +98,8 @@ static int node_init_workers(const nos_node_def_t *node_def, nos_thread_t *worke
         
         /* 将组件加载到具体的工作线程 */
         for (int j = 0; t_def->comp_ids[j] != 0; j++) {
-            /* 动态加载组件 */
-            nos_component_t *comp = node_load_component(t_def->comp_ids[j], t_def->comp_names[j]);
+            /* 动态加载组件 (基于模型库名) */
+            nos_component_t *comp = node_load_component(t_def->comp_ids[j], t_def->comp_names[j], t_def->comp_models[j]);
             if (comp) {
                 if (g_loaded_count < MAX_COMPONENTS_PER_NODE) {
                     g_loaded_components[g_loaded_count++] = comp;
