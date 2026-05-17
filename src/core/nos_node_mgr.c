@@ -41,10 +41,12 @@ static nos_component_t* node_load_component_internal(uint32_t id, const char *na
 
     if (comp->init && comp->init(comp) != NOS_OK) {
         fprintf(stderr, "[Node] Component %s init failed\n", name);
+        comp->status = NOS_COMP_ST_ERROR;
         free((void*)comp->name); free(comp); dlclose(handle);
         return NULL;
     }
 
+    comp->status = NOS_COMP_ST_INITED;
     *out_handle = handle;
     printf("[Node] Loaded %s (ID:%u) from %s\n", name, id, lib_name);
     return comp;
@@ -157,7 +159,10 @@ nos_status_t node_reload_component(const char *name) {
     if (new_comp) {
         loaded_comp_info_t *info = &g_node_ctx.loaded_info[g_node_ctx.loaded_count++];
         info->comp = new_comp; info->handle = new_handle; info->lib_name = lib_name; info->owner_thread = thread;
-        if (new_comp->start) new_comp->start(new_comp);
+        if (new_comp->start) {
+            new_comp->start(new_comp);
+            new_comp->status = NOS_COMP_ST_ACTIVE;
+        }
         nos_scheduler_register_component(thread, new_comp);
         /* 简单路由恢复 */
         nos_service_register_provider_bind(id == 1 ? 101 : (id == 2 ? 102 : (id == 5 ? 105 : 204)), new_comp, thread);

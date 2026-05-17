@@ -18,10 +18,21 @@ static char* cli_commands[] = {
     NULL
 };
 
+static const char* comp_status_str(nos_comp_status_t st) {
+    switch(st) {
+        case NOS_COMP_ST_LOADED:  return "Loaded";
+        case NOS_COMP_ST_INITED:  return "Inited";
+        case NOS_COMP_ST_ACTIVE:  return "Active";
+        case NOS_COMP_ST_STOPPED: return "Stopped";
+        case NOS_COMP_ST_ERROR:   return "Error";
+        default: return "Unknown";
+    }
+}
+
 static void cli_print_help(void) {
     printf("\n--- NOS Node CLI Commands ---\n");
-    printf("  show components       - List all loaded components\n");
-    printf("  show services         - List all service routes\n");
+    printf("  show components       - List all loaded components with status\n");
+    printf("  show services         - List all service routes with availability\n");
     printf("  load <comp_name>      - Reload/Load a component\n");
     printf("  unload <comp_name>    - Unload a component\n");
     printf("  help                  - Show this help\n");
@@ -94,7 +105,8 @@ static void* node_cli_thread_entry(void *arg) {
     char cmd_buf[256];
     char prompt[64];
     int is_tty = isatty(STDIN_FILENO);
-    sprintf(prompt, "nos-node(%s)> ", (char*)arg);
+    const char *current_node = (char*)arg;
+    sprintf(prompt, "nos-node(%s)> ", current_node);
 
     if (is_tty) printf("[CLI] Management interface started. (Tab for completion)\n");
 
@@ -103,7 +115,6 @@ static void* node_cli_thread_entry(void *arg) {
         if (is_tty) {
             len = advanced_get_line(cmd_buf, sizeof(cmd_buf), prompt);
         } else {
-            /* 管道输入模式：使用普通 fgets */
             if (!fgets(cmd_buf, sizeof(cmd_buf), stdin)) break;
             cmd_buf[strcspn(cmd_buf, "\n")] = 0;
             len = strlen(cmd_buf);
@@ -112,25 +123,47 @@ static void* node_cli_thread_entry(void *arg) {
         if (len < 0) break;
         if (len == 0) continue;
 
-        if (strcmp(cmd_buf, "help") == 0) cli_print_help();
-        else if (strcmp(cmd_buf, "quit") == 0) g_node_ctx.keep_running = 0;
-        else if (strcmp(cmd_buf, "show components") == 0) {
-            printf("\n%-15s %-4s %-15s %-12s\n", "Name", "ID", "Model-Lib", "Thread");
-            printf("----------------------------------------------------------\n");
+        if (strcmp(cmd_buf, "help") == 0) {
+            cli_print_help();
+        } else if (strcmp(cmd_buf, "quit") == 0) {
+            g_node_ctx.keep_running = 0;
+        } else if (strcmp(cmd_buf, "show components") == 0) {
+            printf("\n%-15s %-4s %-10s %-15s %-12s\n", "Name", "ID", "Status", "Model-Lib", "Thread");
+            printf("----------------------------------------------------------------------\n");
             for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
                 loaded_comp_info_t *info = &g_node_ctx.loaded_info[i];
-                printf("%-15s %-4u %-15s %-12s\n", info->comp->name, info->comp->id, info->lib_name, info->owner_thread->name);
+                printf("%-15s %-4u %-10s %-15s %-12s\n", 
+                       info->comp->name, info->comp->id, comp_status_str(info->comp->status), 
+                       info->lib_name, info->owner_thread->name);
             }
         } else if (strcmp(cmd_buf, "show services") == 0) {
             uint32_t count = 0;
             const nos_service_def_t *svc_list = nos_manifest_get_services(&count);
-            printf("\n%-8s %-15s %-10s\n", "Svc-ID", "Node", "Provider-ID");
-            printf("------------------------------------------\n");
-            for (uint32_t i = 0; i < count; i++) printf("%-8u %-15s %-10u\n", svc_list[i].service_id, svc_list[i].node_name, svc_list[i].provider_comp_id);
-        } else if (strncmp(cmd_buf, "unload ", 7) == 0) node_unload_component(cmd_buf + 7);
-        else if (strncmp(cmd_buf, "load ", 5) == 0) node_reload_component(cmd_buf + 5);
-        else if (!is_tty) ; // 管道模式不报错未知命令，避免污染日志
-        else printf("Unknown command: %s\n", cmd_buf);
+            printf("\n%-8s %-15s %-8s %-10s\n", "Svc-ID", "Node", "Comp-ID", "Status");
+            printf("----------------------------------------------------------\n");
+            for (uint32_t i = 0; i < count; i++) {
+                const char *status = "Offline";
+                if (strcmp(svc_list[i].node_name, current_node) == 0) {
+                    for (uint32_t j = 0; j < g_node_ctx.loaded_count; j++) {
+                        if (g_node_ctx.loaded_info[j].comp->id == svc_list[i].provider_comp_id) {
+                            status = (g_node_ctx.loaded_info[j].comp->status == NOS_COMP_ST_ACTIVE) ? "Active" : "Inactive";
+                            break;
+                        }
+                    }
+                } else {
+                    status = "Remote";
+                }
+                printf("%-8u %-15s %-8u %-10s\n", 
+                       svc_list[i].service_id, svc_list[i].node_name, 
+                       svc_list[i].provider_comp_id, status);
+            }
+        } else if (strncmp(cmd_buf, "unload ", 7) == 0) {
+            node_unload_component(cmd_buf + 7);
+        } else if (strncmp(cmd_buf, "load ", 5) == 0) {
+            node_reload_component(cmd_buf + 5);
+        } else if (is_tty) {
+            printf("Unknown command: %s\n", cmd_buf);
+        }
     }
     return NULL;
 }

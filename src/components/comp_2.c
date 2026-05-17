@@ -36,10 +36,15 @@ static void comp_stop(nos_component_t *self) {
     }
 }
 
+static nos_status_t comp_start(nos_component_t *self) {
+    return NOS_OK;
+}
+
 nos_status_t nos_export_component(nos_component_t *comp) {
     if (!comp) return NOS_ERR;
     comp->on_msg = comp_on_msg;
     comp->init = comp_init;
+    comp->start = comp_start;
     comp->stop = comp_stop;
     printf("[LibComp] Component '%s' (ID:%u) exported with Isolation Support.\n", comp->name, comp->id);
     return NOS_OK;

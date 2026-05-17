@@ -7,11 +7,23 @@
 struct nos_service_msg_s;
 
 /**
+ * @brief 组件运行状态
+ */
+typedef enum {
+    NOS_COMP_ST_LOADED,    /**< 已加载，尚未初始化 */
+    NOS_COMP_ST_INITED,    /**< 已初始化 */
+    NOS_COMP_ST_ACTIVE,    /**< 正在运行 */
+    NOS_COMP_ST_STOPPED,   /**< 已停止 */
+    NOS_COMP_ST_ERROR      /**< 运行异常 */
+} nos_comp_status_t;
+
+/**
  * @brief 组件对象结构体
  */
 typedef struct nos_component_s {
     uint32_t id;                /**< 组件全局唯一 ID */
     const char *name;           /**< 组件名称 */
+    nos_comp_status_t status;   /**< 组件当前运行状态 */
     void *priv;                 /**< 组件私有数据上下文 */
 
     /**
