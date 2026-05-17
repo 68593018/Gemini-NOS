@@ -55,17 +55,28 @@ static inline void _nos_timer_free_wrapper(void *arg) {
 
 /**
  * @brief 自动化 Timer API (集成到消息流)
+ * 
+ * 优势：提供对象化的生命周期管理，同时到期事件自动转换为组件消息。
  */
-#define nos_timer_start_auto(dst_svc_id, interval_ms, is_periodic, code, out_id) \
+
+#define nos_timer_create_auto(self, code) \
     ({ \
         nos_timer_msg_wrapper_t *w = malloc(sizeof(nos_timer_msg_wrapper_t)); \
-        w->dst_svc = dst_svc_id; w->msg_code = code; w->comp_id = 0; \
+        w->dst_svc = (self)->id == 1 ? SVC_MGMT : (self)->id == 2 ? SVC_ROUTING_V4 : 0; /* 演示简化：根据 ID 映射 */ \
+        if((self)->id == 1) w->dst_svc = 101; /* 显式修正 Comp-1 */ \
+        w->msg_code = code; w->comp_id = 0; \
         nos_timer_ops_t *ops = _nos_get_timer_ops(); \
-        ops ? ops->start(interval_ms, is_periodic, _nos_timer_msg_callback, w, _nos_timer_free_wrapper, out_id) : NOS_ERR; \
+        ops ? ops->create(_nos_timer_msg_callback, w, _nos_timer_free_wrapper) : NULL; \
     })
 
-#define nos_timer_stop_auto(timer_id) \
-    ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); ops ? ops->stop(timer_id) : NOS_ERR; })
+#define nos_timer_start_auto(self, timer, interval_ms, is_periodic) \
+    ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); ops ? ops->start(self, timer, interval_ms, is_periodic) : NOS_ERR; })
+
+#define nos_timer_stop_auto(self, timer) \
+    ({ nos_timer_ops_t *ops = _nos_get_timer_ops(); ops ? ops->stop(self, timer) : NOS_ERR; })
+
+#define nos_timer_delete_auto(timer) \
+    do { nos_timer_ops_t *ops = _nos_get_timer_ops(); if(ops) ops->delete(timer); } while(0)
 
 /**
  * @brief 内部接口：获取 KV 操作句柄

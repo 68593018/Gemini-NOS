@@ -18,23 +18,10 @@ typedef struct {
 } nos_fd_entry_t;
 
 /**
- * @brief 定时器节点定义
- */
-typedef struct {
-    uint32_t timer_id;
-    uint64_t expire_at_ms;
-    uint32_t interval_ms;
-    int      is_periodic;
-    nos_timer_cb_t callback;
-    nos_timer_free_arg_t free_arg;
-    void    *arg;
-} nos_timer_node_t;
-
-/**
  * @brief 定时器最小堆
  */
 typedef struct {
-    nos_timer_node_t **nodes;
+    nos_timer_t      **nodes;
     uint32_t           size;
     uint32_t           capacity;
 } nos_timer_heap_t;

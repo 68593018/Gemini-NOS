@@ -9,7 +9,7 @@
 #include "nos_api.h"
 
 typedef struct {
-    uint32_t heartbeat_timer;
+    nos_timer_t *heartbeat_timer;
 } comp_ctx_t;
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
@@ -54,10 +54,24 @@ static nos_status_t comp_init(nos_component_t *self) {
 
 static nos_status_t comp_start(nos_component_t *self) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
-    /* 启动一个 3 秒的周期性定时器，发给自己的 SVC_MGMT (101)，Code 设为 999 */
-    nos_timer_start_auto(SVC_MGMT, 3000, 1, 999, &ctx->heartbeat_timer);
-    nos_log_info(self, "Heartbeat timer started (3s, Target: SVC_MGMT)");
+    /* 1. 创建定时器对象，绑定到 Code 999 消息 */
+    ctx->heartbeat_timer = nos_timer_create_auto(self, 999);
+    
+    /* 2. 启动定时器 */
+    if (ctx->heartbeat_timer) {
+        nos_timer_start_auto(self, ctx->heartbeat_timer, 3000, 1);
+        nos_log_info(self, "Heartbeat timer object created and started (3s)");
+    }
     return NOS_OK;
+}
+
+static void comp_stop(nos_component_t *self) {
+    comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
+    if (ctx && ctx->heartbeat_timer) {
+        nos_timer_delete_auto(ctx->heartbeat_timer);
+        ctx->heartbeat_timer = NULL;
+    }
+    if (self->priv) free(self->priv);
 }
 
 nos_status_t nos_export_component(nos_component_t *comp) {
@@ -65,5 +79,6 @@ nos_status_t nos_export_component(nos_component_t *comp) {
     comp->on_msg = comp_on_msg;
     comp->init = comp_init;
     comp->start = comp_start;
+    comp->stop = comp_stop;
     return NOS_OK;
 }

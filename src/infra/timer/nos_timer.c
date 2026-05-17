@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nos_timer_api.h"
-#include "nos_api.h"
 
 static nos_timer_ops_t g_timer_ops = {
+    .create = nos_timer_create,
     .start = nos_timer_start,
-    .stop = nos_timer_stop
+    .stop = nos_timer_stop,
+    .delete = nos_timer_delete
 };
 
 void nos_timer_init(void) {
