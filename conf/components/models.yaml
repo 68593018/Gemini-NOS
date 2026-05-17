@@ -1,0 +1,11 @@
+models:
+  - name: "Model1"
+    lib: "libcomp-1.so"
+  - name: "Model2"
+    lib: "libcomp-2.so"
+  - name: "Model3"
+    lib: "libcomp-3.so"
+  - name: "Model4"
+    lib: "libcomp-4.so"
+  - name: "Model5"
+    lib: "libcomp-5.so"

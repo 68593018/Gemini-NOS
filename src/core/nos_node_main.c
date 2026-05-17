@@ -58,6 +58,15 @@ static nos_component_t* node_load_component(uint32_t id, const char *name, const
         return NULL;
     }
 
+    /* 触发初始化生命周期 */
+    if (comp->init && comp->init(comp) != NOS_OK) {
+        fprintf(stderr, "[Node] Component %s init failed\n", name);
+        free((void*)comp->name);
+        free(comp);
+        dlclose(handle);
+        return NULL;
+    }
+
     printf("[Node] Successfully loaded dynamic component: %s (ID:%u) using Model Lib: %s\n", name, id, lib_name);
     return comp;
 }
@@ -153,23 +162,27 @@ static void node_setup_routing(const char *current_node_name, nos_thread_t *work
 }
 
 /**
- * @brief 临时测试逻辑
+ * @brief 隔离性测试触发逻辑
  */
 static void node_run_test_trigger(const char *node_name) {
     if (strcmp(node_name, "ProcA") == 0) {
         sleep(2);
-        printf("[Node] %s triggering initial service test...\n", node_name);
-        nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 16);
-        if (buf) {
-            nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
-            msg->magic = NOS_IPC_MAGIC;
-            msg->version = NOS_IPC_VERSION;
-            msg->dst_service = 204; /* 假定 204 是远程或本地服务 ID */
-            msg->src_component = 1;
-            msg->msg_code = 1001;
-            msg->payload_len = 32;
-            strcpy((char*)(buf->data + sizeof(nos_service_msg_t)), "Ping from node_main");
-            nos_service_msg_send(buf);
+        printf("[Node] %s triggering isolation test (Ping Services 102 and 105)...\n", node_name);
+        
+        uint32_t targets[] = {102, 105, 102, 102}; // 多次发送给 102，确认 105 不受影响
+        for (int i = 0; i < 4; i++) {
+            nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 0);
+            if (buf) {
+                nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+                msg->magic = NOS_IPC_MAGIC;
+                msg->version = NOS_IPC_VERSION;
+                msg->dst_service = targets[i];
+                msg->src_component = 999;
+                msg->msg_code = 1001;
+                msg->payload_len = 32;
+                sprintf((char*)(buf->data + sizeof(nos_service_msg_t)), "Ping target %u", targets[i]);
+                nos_service_msg_send(buf);
+            }
         }
     }
 }
@@ -202,7 +215,15 @@ int main(int argc, char *argv[]) {
     /* 3. 配置路由 */
     node_setup_routing(node_name, worker_threads, worker_count);
 
-    /* 4. 物理线程启动 */
+    /* 4. 触发启动生命周期 */
+    for (uint32_t i = 0; i < g_loaded_count; i++) {
+        if (g_loaded_components[i]->start) {
+            g_loaded_components[i]->start(g_loaded_components[i]);
+            printf("[Node] Started component: %s\n", g_loaded_components[i]->name);
+        }
+    }
+
+    /* 5. 物理线程启动 */
     pthread_t mgmt_tid;
     pthread_create(&mgmt_tid, NULL, scheduler_thread_entry, mgmt_thread);
 

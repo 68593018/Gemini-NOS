@@ -268,10 +268,6 @@ static void process_thread_messages(nos_thread_t *self) {
         if (header->dst_service != 0) {
             service_entry_t *entry = find_service_entry(header->dst_service);
             if (entry) target = entry->local_provider;
-        } else {
-            for (uint32_t i = 0; i < self->component_count; i++) {
-                if (self->components[i]->id == 1) { target = self->components[i]; break; }
-            }
         }
 
         if (target && target->on_msg) target->on_msg(target, header);
