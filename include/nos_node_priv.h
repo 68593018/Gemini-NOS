@@ -23,6 +23,7 @@ typedef struct {
  * @brief 节点全局上下文收敛结构体
  */
 typedef struct {
+    const nos_node_def_t *node_def;
     loaded_comp_info_t loaded_info[MAX_COMPONENTS_PER_NODE];
     uint32_t loaded_count;
     volatile int keep_running;

@@ -9,11 +9,10 @@ except ImportError:
     USE_PYYAML = False
 
 def to_c_macro(name):
-    # 将名称转换为合法的 C 宏名 (大写, 非字母数字转下划线)
     return re.sub(r'[^a-zA-Z0-9]', '_', name).upper()
 
 def parse_yaml_fallback(file_path):
-    data = {"nodes": [], "services": [], "components": [], "profiles": [], "models": []}
+    data = {"nodes": [], "components": [], "profiles": [], "models": []}
     if not os.path.exists(file_path): return data
     with open(file_path, 'r') as f:
         lines = f.readlines()
@@ -24,7 +23,6 @@ def parse_yaml_fallback(file_path):
         indent = len(line) - len(line.lstrip())
         content = line.strip()
         if content == "nodes:": mode = "nodes"; continue
-        if content == "services:": mode = "services"; continue
         if content == "components:": mode = "components"; continue
         if content == "profiles:": mode = "profiles"; continue
         if content == "models:": mode = "models"; continue
@@ -43,16 +41,22 @@ def parse_yaml_fallback(file_path):
                 data["nodes"][-1]["threads"][-1]["components"] = [c.strip().strip('"') for c in comps if c.strip()]
         elif mode == "components":
             if content.startswith("- name:"):
-                data["components"].append({"name": content.split(":")[1].strip().strip('"'), "model": "", "services": []})
+                data["components"].append({"name": content.split(":")[1].strip().strip('"'), "model": "", "provides": [], "requires": []})
             elif "id:" in content and indent == 4:
                 data["components"][-1]["id"] = int(content.split(":")[1].strip())
             elif "model:" in content:
                 data["components"][-1]["model"] = content.split(":")[1].strip().strip('"')
-            elif "name:" in content and indent > 4: # 解析实例下的服务
-                svc_name = content.split(":")[1].strip().strip('"')
-                data["components"][-1]["services"].append({"name": svc_name})
-            elif "id:" in content and indent > 4:
-                data["components"][-1]["services"][-1]["id"] = int(content.split(":")[1].strip())
+            elif "provides:" in content:
+                pass # next lines will have items
+            elif content.startswith("- { name:") and indent > 4: # provides item
+                svc_name = re.search(r'name:\s*"([^"]+)"', content).group(1)
+                svc_id = int(re.search(r'id:\s*(\d+)', content).group(1))
+                data["components"][-1]["provides"].append({"name": svc_name, "id": svc_id})
+            elif "requires:" in content:
+                pass # next lines will have items
+            elif content.startswith("- ") and indent > 4: # requires item
+                req_name = content.split("-")[1].strip().strip('"')
+                data["components"][-1]["requires"].append(req_name)
         elif mode == "models":
             if content.startswith("- name:"):
                 data["models"].append({"name": content.split(":")[1].strip().strip('"'), "lib": ""})
@@ -71,58 +75,78 @@ def parse_yaml_fallback(file_path):
     return data
 
 def validate_and_resolve(data):
-    name_to_id = {c["name"]: c["id"] for c in data["components"]}
-    name_to_model = {c["name"]: c["model"] for c in data["components"]}
+    # 1. Map component name to its info
+    comp_map = {c["name"]: c for c in data["components"]}
+    # 2. Map model name to lib
     model_to_lib = {m["name"]: m["lib"] for m in data["models"]}
-    profile_map = {p["name"]: p["bins"] for p in data["profiles"]}
-    comp_to_node = {}
-    
-    # 提取所有服务定义
-    all_services = []
+    # 3. Global Service map: svc_name -> {id, provider_comp_id, node_name}
+    global_svc_map = {}
     svc_name_to_id = {}
-    for comp in data["components"]:
-        for svc in comp.get("services", []):
-            all_services.append({
-                "id": svc["id"],
-                "node": None, # 后面填充
-                "provider_id": comp["id"]
-            })
-            svc_name_to_id[svc["name"]] = svc["id"]
-    data["resolved_services"] = all_services
-    data["svc_name_to_id"] = svc_name_to_id
+    comp_to_node = {}
 
+    # First pass: map components to nodes
+    for node in data["nodes"]:
+        for thread in node["threads"]:
+            for comp_name in thread["components"]:
+                if comp_name in comp_map:
+                    comp_to_node[comp_name] = node["name"]
+
+    # Second pass: map services to providers and nodes
+    for comp in data["components"]:
+        for svc in comp.get("provides", []):
+            svc_name = svc["name"]
+            global_svc_map[svc_name] = {
+                "id": svc["id"],
+                "provider_id": comp["id"],
+                "node": comp_to_node.get(comp["name"], "Unknown")
+            }
+            svc_name_to_id[svc_name] = svc["id"]
+
+    # 4. Resolve per-node requirements and startup levels (Simplified)
+    profile_map = {p["name"]: p["bins"] for p in data["profiles"]}
     for node in data["nodes"]:
         pname = node.get("buffer_profile", "default")
         node["resolved_bins"] = profile_map.get(pname, profile_map.get("default", []))
         
+        node_comps = []
         for thread in node["threads"]:
             resolved_ids = []
             resolved_names = []
             resolved_libs = []
             for comp_name in thread["components"]:
-                cid = name_to_id.get(comp_name)
-                mname = name_to_model.get(comp_name)
-                lib = model_to_lib.get(mname)
-                
-                if cid is None:
+                comp = comp_map.get(comp_name)
+                if not comp:
                     print(f"Error: Unknown component '{comp_name}'"); sys.exit(1)
-                if lib is None:
-                    print(f"Error: No library defined for model '{mname}' (Comp: {comp_name})"); sys.exit(1)
-                    
-                resolved_ids.append(cid)
+                mname = comp["model"]
+                lib = model_to_lib.get(mname)
+                if not lib:
+                    print(f"Error: No lib for model '{mname}'"); sys.exit(1)
+                
+                resolved_ids.append(comp["id"])
                 resolved_names.append(comp_name)
                 resolved_libs.append(lib)
-                comp_to_node[cid] = node["name"]
+                node_comps.append(comp_name)
                 
             thread["comp_ids"] = resolved_ids
             thread["comp_names"] = resolved_names
             thread["comp_libs"] = resolved_libs
-            
-    # 填充服务的 Node 信息
-    for svc in data["resolved_services"]:
-        svc["node"] = comp_to_node.get(svc["provider_id"])
+
+        # Identify services needed by this node
+        needed_svc_names = set()
+        for comp_name in node_comps:
+            comp = comp_map[comp_name]
+            for s in comp.get("provides", []): needed_svc_names.add(s["name"])
+            for s in comp.get("requires", []): needed_svc_names.add(s)
         
-    return name_to_id, svc_name_to_id
+        node_services = []
+        for sname in needed_svc_names:
+            svc_info = global_svc_map.get(sname)
+            if not svc_info:
+                print(f"Error: Service '{sname}' required but not provided."); sys.exit(1)
+            node_services.append(svc_info)
+        node["resolved_services"] = node_services
+
+    return {c["name"]: c["id"] for c in data["components"]}, svc_name_to_id
 
 def generate_header(comp_ids, svc_ids, header_path):
     lines = ["#ifndef __NOS_IDS_H__", "#define __NOS_IDS_H__", ""]
@@ -136,19 +160,23 @@ def generate_header(comp_ids, svc_ids, header_path):
     lines.append("")
     lines.append("#endif")
     with open(header_path, 'w') as f: f.write("\n".join(lines))
-    print(f"Generated {header_path} with {len(comp_ids)} components and {len(svc_ids)} services.")
 
 def generate_c_code(data, output_path):
     c_content = ['#include <string.h>', '#include "nos_manifest.h"', '']
     
-    # 先生成各个节点的池定义
     for node in data["nodes"]:
         safe_name = node["name"].lower()
+        # Per-node pools
         c_content.append(f'static const nos_buffer_pool_def_t g_{safe_name}_pools[] = {{')
         for b in node["resolved_bins"]:
             c_content.append(f'    {{ .chunk_size = {b["size"]}, .chunk_count = {b["count"]} }},')
-        c_content.append('    { .chunk_size = 0 }')
-        c_content.append('};\n')
+        c_content.append('    { .chunk_size = 0 }\n};')
+        
+        # Per-node services
+        c_content.append(f'static const nos_service_def_t g_{safe_name}_services[] = {{')
+        for s in node["resolved_services"]:
+            c_content.append(f'    {{ .service_id = {s["id"]}, .node_name = "{s["node"]}", .provider_comp_id = {s["provider_id"]} }},')
+        c_content.append(f'    {{ .service_id = 0 }}\n}};')
 
     c_content.append('static const nos_node_def_t g_nodes[] = {')
     for node in data["nodes"]:
@@ -163,25 +191,21 @@ def generate_c_code(data, output_path):
             libs_str = ", ".join(f'"{l}"' for l in thread["comp_libs"])
             c_content.append(f'            {{ .name = "{thread["name"]}", .comp_ids = {{{ids_str}, 0}}, .comp_names = {{{names_str}, NULL}}, .comp_models = {{{libs_str}, NULL}} }},')
         c_content.append('            { .name = NULL }')
-        c_content.append('        }')
+        c_content.append('        },')
+        c_content.append(f'        .services = g_{safe_name}_services, .service_count = {len(node["resolved_services"])}')
         c_content.append('    },')
     c_content.append('};')
-    c_content.append('static const nos_service_def_t g_services[] = {')
-    for svc in data["resolved_services"]:
-        c_content.append(f'    {{ .service_id = {svc["id"]}, .node_name = "{svc["node"]}", .provider_comp_id = {svc["provider_id"]} }},')
-    c_content.append('};\n')
+    
     c_content.append('const nos_node_def_t* nos_manifest_get_node(const char *n) {')
     c_content.append('    for (size_t i=0; i<sizeof(g_nodes)/sizeof(g_nodes[0]); i++) if(strcmp(g_nodes[i].name, n)==0) return &g_nodes[i];')
     c_content.append('    return NULL;\n}\n')
-    c_content.append('const nos_service_def_t* nos_manifest_get_services(uint32_t *c) { *c = sizeof(g_services)/sizeof(g_services[0]); return g_services; }')
+    
     with open(output_path, 'w') as f: f.write("\n".join(c_content))
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print("Usage: python3 gen_manifest.py <input_dir> <output.c> <output.h>")
-        sys.exit(1)
+    if len(sys.argv) < 4: sys.exit(1)
     input_dir, out_c, out_h = sys.argv[1], sys.argv[2], sys.argv[3]
-    master = {"nodes": [], "services": [], "components": [], "profiles": [], "models": []}
+    master = {"nodes": [], "components": [], "profiles": [], "models": []}
     for r, ds, files in os.walk(input_dir):
         for f in files:
             if f.endswith(".yaml"):

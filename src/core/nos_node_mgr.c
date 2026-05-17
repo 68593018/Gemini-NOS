@@ -90,12 +90,12 @@ void node_init_workers(const nos_node_def_t *node_def) {
 }
 
 void node_setup_routing(const char *current_node_name) {
-    uint32_t svc_count = 0;
-    const nos_service_def_t *svc_list = nos_manifest_get_services(&svc_count);
+    const nos_node_def_t *node = g_node_ctx.node_def;
     
-    for (uint32_t i = 0; i < svc_count; i++) {
-        const nos_service_def_t *svc = &svc_list[i];
+    for (uint32_t i = 0; i < node->service_count; i++) {
+        const nos_service_def_t *svc = &node->services[i];
         if (strcmp(svc->node_name, current_node_name) == 0) {
+            /* 本地服务绑定 */
             nos_component_t *provider = node_get_loaded_comp_by_id(svc->provider_comp_id);
             nos_thread_t *owner_worker = NULL;
             for (uint32_t t = 0; t < g_node_ctx.worker_count; t++) {
@@ -108,6 +108,7 @@ void node_setup_routing(const char *current_node_name) {
             }
             if (provider && owner_worker) nos_service_register_provider_bind(svc->service_id, provider, owner_worker);
         } else {
+            /* 远程服务注册 (仅注册该节点需要的远程服务) */
             const nos_node_def_t *remote_node = nos_manifest_get_node(svc->node_name);
             if (remote_node) nos_service_register_remote(svc->service_id, remote_node->uds_path);
         }
@@ -126,9 +127,12 @@ nos_status_t node_unload_component(const char *name) {
     loaded_comp_info_t *info = &g_node_ctx.loaded_info[idx];
     nos_scheduler_unregister_component(info->owner_thread, info->comp);
     
-    /* 简化版注销 */
-    nos_service_unregister_provider(101); nos_service_unregister_provider(102);
-    nos_service_unregister_provider(105); nos_service_unregister_provider(204);
+    /* 遍历该进程关注的服务列表，注销与此组件相关的本地路由 */
+    for (uint32_t i = 0; i < g_node_ctx.node_def->service_count; i++) {
+        if (g_node_ctx.node_def->services[i].provider_comp_id == info->comp->id) {
+            nos_service_unregister_provider(g_node_ctx.node_def->services[i].service_id);
+        }
+    }
 
     if (info->comp->stop) info->comp->stop(info->comp);
     free((void*)info->comp->name); free(info->comp); dlclose(info->handle);
@@ -164,8 +168,14 @@ nos_status_t node_reload_component(const char *name) {
             new_comp->status = NOS_COMP_ST_ACTIVE;
         }
         nos_scheduler_register_component(thread, new_comp);
-        /* 简单路由恢复 */
-        nos_service_register_provider_bind(id == 1 ? 101 : (id == 2 ? 102 : (id == 5 ? 105 : 204)), new_comp, thread);
+        
+        /* 重新绑定受影响的本地服务 */
+        for (uint32_t i = 0; i < g_node_ctx.node_def->service_count; i++) {
+            if (g_node_ctx.node_def->services[i].provider_comp_id == id &&
+                strcmp(g_node_ctx.node_def->services[i].node_name, g_node_ctx.node_def->name) == 0) {
+                nos_service_register_provider_bind(g_node_ctx.node_def->services[i].service_id, new_comp, thread);
+            }
+        }
     } else {
         free((void*)lib_name);
     }

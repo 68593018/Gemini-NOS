@@ -29,6 +29,8 @@ typedef struct {
     const char *uds_path;   /**< 进程监听的 UDS 路径 */
     const nos_buffer_pool_def_t *buffer_pools; /**< 指向缓冲区池配置列表 (chunk_size 为 0 结束) */
     nos_thread_def_t threads[8]; /**< 进程内的线程列表 (空名字结束) */
+    const struct nos_service_def_s *services;  /**< 该节点关注的服务列表 (按需生成) */
+    uint32_t service_count; /**< 服务列表数量 */
 } nos_node_def_t;
 
 /**
@@ -44,7 +46,7 @@ typedef enum {
 /**
  * @brief 服务定义
  */
-typedef struct {
+typedef struct nos_service_def_s {
     uint32_t service_id;    /**< 服务逻辑 ID */
     const char *node_name;  /**< 提供该服务的节点名称 */
     uint32_t provider_comp_id; /**< 提供该服务的组件 ID */
@@ -56,10 +58,5 @@ typedef struct {
  * @brief 获取节点定义
  */
 const nos_node_def_t* nos_manifest_get_node(const char *node_name);
-
-/**
- * @brief 获取所有服务定义
- */
-const nos_service_def_t* nos_manifest_get_services(uint32_t *count);
 
 #endif /* __NOS_MANIFEST_H__ */

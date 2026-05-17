@@ -34,6 +34,8 @@ int main(int argc, char *argv[]) {
     const nos_node_def_t *node_def = nos_manifest_get_node(node_name);
     if (!node_def) { printf("Error: Node '%s' not found.\n", node_name); return -1; }
 
+    g_node_ctx.node_def = node_def;
+
     printf("--- [NOS Node: %s] Starting ---\n", node_name);
     nos_buffer_init_pool(node_def->buffer_pools);
 
