@@ -18,6 +18,9 @@
 #define MAX_EVENTS 10
 #define MAX_COMP_PER_THREAD 32
 
+/* 线程局部变量：存储当前线程的调度器指针 */
+static __thread nos_thread_t *t_local_scheduler = NULL;
+
 /* 服务注册表项 */
 typedef struct {
     uint32_t service_id;
@@ -47,6 +50,7 @@ struct nos_timer_s {
     nos_timer_free_arg_t free_arg;
     void    *arg;
     int      is_running;
+    nos_thread_t *owner_thread; // 归属线程
 };
 
 static uint64_t get_monotonic_ms(void) {
@@ -88,7 +92,9 @@ static void process_timers(nos_thread_t *self) {
         self->timer_heap.nodes[0] = self->timer_heap.nodes[--self->timer_heap.size];
         heapify_down(self, 0);
         timer->is_running = 0;
+
         if (timer->callback) timer->callback(timer->arg);
+
         if (timer->is_periodic) {
             timer->expire_at_ms = get_monotonic_ms() + timer->interval_ms;
             timer->is_running = 1;
@@ -118,6 +124,7 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     struct epoll_event ev = {.events = EPOLLIN, .data.fd = thread->notify_fd[0]};
     epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, thread->notify_fd[0], &ev);
     thread->timer_heap.capacity = 128;
+    thread->timer_heap.size = 0;
     thread->timer_heap.nodes = calloc(thread->timer_heap.capacity, sizeof(nos_timer_t*));
     return NOS_OK;
 }
@@ -304,6 +311,7 @@ void nos_scheduler_stop(nos_thread_t *thread) {
 
 nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
     if (!self) return NOS_ERR;
+    t_local_scheduler = self;
     for (uint32_t i = 0; i < self->component_count; i++) {
         nos_component_t *comp = self->components[i];
         if (comp && comp->start && comp->status != NOS_COMP_ST_ACTIVE) {
@@ -347,7 +355,7 @@ nos_status_t nos_timer_start(nos_component_t *self, nos_timer_t *timer, uint32_t
     nos_thread_t *thread = find_thread_of_component(self);
     if (!thread || !timer || timer->is_running || thread->timer_heap.size >= thread->timer_heap.capacity) return NOS_ERR;
     timer->interval_ms = interval_ms; timer->expire_at_ms = get_monotonic_ms() + interval_ms;
-    timer->is_periodic = is_periodic; timer->is_running = 1;
+    timer->is_periodic = is_periodic; timer->is_running = 1; timer->owner_thread = thread;
     thread->timer_heap.nodes[thread->timer_heap.size] = timer;
     heapify_up(thread, thread->timer_heap.size++);
     char notify_cmd = 't'; write(thread->notify_fd[1], &notify_cmd, 1);
@@ -355,7 +363,8 @@ nos_status_t nos_timer_start(nos_component_t *self, nos_timer_t *timer, uint32_t
 }
 
 nos_status_t nos_timer_stop(nos_component_t *self, nos_timer_t *timer) {
-    nos_thread_t *thread = find_thread_of_component(self);
+    nos_thread_t *thread = timer->owner_thread; // 优先使用自持的线程上下文
+    if (!thread) thread = find_thread_of_component(self);
     if (!thread || !timer || !timer->is_running) return NOS_ERR;
     for (uint32_t i = 0; i < thread->timer_heap.size; i++) {
         if (thread->timer_heap.nodes[i] == timer) {
@@ -368,7 +377,15 @@ nos_status_t nos_timer_stop(nos_component_t *self, nos_timer_t *timer) {
 
 void nos_timer_delete(nos_timer_t *timer) {
     if (!timer) return;
-    if (timer->is_running) { /* 此处不传 self 停止可能由于组件已 unload 风险，应通过 stop 处理 */ }
+    if (timer->is_running && timer->owner_thread) {
+        nos_thread_t *t = timer->owner_thread;
+        for (uint32_t i = 0; i < t->timer_heap.size; i++) {
+            if (t->timer_heap.nodes[i] == timer) {
+                t->timer_heap.nodes[i] = t->timer_heap.nodes[--t->timer_heap.size];
+                heapify_down(t, i); break;
+            }
+        }
+    }
     if (timer->free_arg) timer->free_arg(timer->arg);
     free(timer);
 }
