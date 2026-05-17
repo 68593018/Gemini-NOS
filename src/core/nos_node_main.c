@@ -34,8 +34,12 @@ int main(int argc, char *argv[]) {
 
     g_node_ctx.node_def = node_def;
 
-    /* 初始化日志服务 */
-    nos_log_init();
+    /* 按需初始化平台基础设施 (由清单驱动) */
+    if (node_def->platform_inits) {
+        for (int i = 0; node_def->platform_inits[i] != NULL; i++) {
+            node_def->platform_inits[i]();
+        }
+    }
 
     printf("--- [NOS Node: %s] Starting ---\n", node_def->name);
     nos_buffer_init_pool(node_def->buffer_pools);

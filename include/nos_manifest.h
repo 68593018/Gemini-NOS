@@ -22,6 +22,11 @@ typedef struct {
 } nos_buffer_pool_def_t;
 
 /**
+ * @brief 平台基础设施初始化函数类型
+ */
+typedef void (*nos_platform_init_func_t)(void);
+
+/**
  * @brief 节点（进程）定义
  */
 typedef struct {
@@ -31,6 +36,7 @@ typedef struct {
     nos_thread_def_t threads[8]; /**< 进程内的线程列表 (空名字结束) */
     const struct nos_service_def_s *services;  /**< 该节点关注的服务列表 (按需生成) */
     uint32_t service_count; /**< 服务列表数量 */
+    const nos_platform_init_func_t *platform_inits; /**< 平台基础设施初始化函数列表 (NULL 结束) */
 } nos_node_def_t;
 
 /**
