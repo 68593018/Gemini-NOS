@@ -1,0 +1,8 @@
+set breakpoint pending on
+b heartbeat_callback
+run &
+# Wait for some time for the timer to fire
+shell sleep 5
+# Switch to the thread that hit the breakpoint (Worker-1)
+thread apply all bt
+quit
