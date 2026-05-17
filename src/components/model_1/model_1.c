@@ -12,25 +12,25 @@ typedef struct {
     nos_timer_t *heartbeat_timer;
 } comp_ctx_t;
 
-static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
-    /* 1. 处理来自定时器的到期事件 (Code 999) */
-    if (msg->msg_code == 999) {
-        nos_log_debug(self, "Timer triggered: sending heartbeat to SVC_ROUTING_V4");
-        nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t), 0);
-        if (buf) {
-            nos_service_msg_t *hb = (nos_service_msg_t *)buf->data;
-            hb->magic = NOS_IPC_MAGIC;
-            hb->dst_service = SVC_ROUTING_V4; // 发送给 Comp-2
-            hb->src_component = self->id;
-            hb->msg_code = 1001;
-            hb->payload_len = 0;
-            nos_service_msg_send(buf);
-            nos_buffer_release(buf);
-        }
-        return;
+/* 真正的定时器到期回调 */
+static void heartbeat_callback(void *arg) {
+    nos_component_t *self = (nos_component_t *)arg;
+    
+    nos_log_debug(self, "Timer callback: sending heartbeat to Comp-2");
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t), 0);
+    if (buf) {
+        nos_service_msg_t *hb = (nos_service_msg_t *)buf->data;
+        hb->magic = NOS_IPC_MAGIC;
+        hb->dst_service = SVC_ROUTING_V4; // 发送给 Comp-2
+        hb->src_component = self->id;
+        hb->msg_code = 1001;
+        hb->payload_len = 0;
+        nos_service_msg_send(buf);
+        nos_buffer_release(buf);
     }
+}
 
-    /* 2. 处理原有业务消息 */
+static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     nos_log_info(self, "Received msg from Comp %u, Code %u", msg->src_component, msg->msg_code);
 
     if (msg->msg_code == 1001) {
@@ -48,14 +48,15 @@ static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
 
 static nos_status_t comp_init(nos_component_t *self) {
     self->priv = calloc(1, sizeof(comp_ctx_t));
+    if (!self->priv) return NOS_ERR;
     nos_log_debug(self, "Initialized via Auto-Injection API");
     return NOS_OK;
 }
 
 static nos_status_t comp_start(nos_component_t *self) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
-    /* 1. 创建定时器对象，绑定到 Code 999 消息 */
-    ctx->heartbeat_timer = nos_timer_create_auto(self, 999);
+    /* 1. 创建定时器对象，绑定到纯回调函数 */
+    ctx->heartbeat_timer = nos_timer_create_auto(heartbeat_callback, self, NULL);
     
     /* 2. 启动定时器 */
     if (ctx->heartbeat_timer) {
@@ -71,7 +72,7 @@ static void comp_stop(nos_component_t *self) {
         nos_timer_delete_auto(ctx->heartbeat_timer);
         ctx->heartbeat_timer = NULL;
     }
-    if (self->priv) free(self->priv);
+    if (self->priv) { free(self->priv); self->priv = NULL; }
 }
 
 nos_status_t nos_export_component(nos_component_t *comp) {
