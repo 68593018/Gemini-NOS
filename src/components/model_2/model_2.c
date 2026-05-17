@@ -6,24 +6,21 @@
 #include "nos_service.h"
 #include "nos_buffer.h"
 #include "nos_ids.h"
-#include "nos_log.h"
+#include "nos_api.h"
 
 typedef struct {
-    nos_log_ops_t *log;
     int local_counter;
 } comp_ctx_t;
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
     ctx->local_counter++;
-    if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_INFO, self->name, "Msg received, counter: %d", ctx->local_counter);
+    nos_log_info(self->name, "Msg received, counter: %d", ctx->local_counter);
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
-    comp_ctx_t *ctx = calloc(1, sizeof(comp_ctx_t));
-    ctx->log = nos_embedded_service_get("SVC_LOG");
-    self->priv = ctx;
-    if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_DEBUG, self->name, "Context initialized");
+    self->priv = calloc(1, sizeof(comp_ctx_t));
+    nos_log_debug(self->name, "Context initialized via Auto-Injection");
     return NOS_OK;
 }
 
