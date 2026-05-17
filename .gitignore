@@ -1,7 +1,11 @@
 # Build artifacts
+nos_node
 nos_demo
 nos_epoll_demo
 nos_async_demo
+
+# Runtime logs
+*.log
 
 # Object files
 *.o
