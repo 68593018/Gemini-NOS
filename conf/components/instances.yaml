@@ -1,6 +1,7 @@
 platform:
   provides:
     - { name: "SVC_LOG", id: 1, type: "embedded" }
+    - { name: "SVC_KV_DB", id: 2, type: "embedded" }
 
 components:
   - name: "Comp-1"
@@ -21,6 +22,7 @@ components:
     requires:
       - "SVC_LOG"
       - "SVC_DATA_PROC"
+      - "SVC_KV_DB"
 
   - name: "Comp-3"
     model: "Model3"
@@ -44,3 +46,4 @@ components:
     requires:
       - "SVC_LOG"
       - "SVC_DATA_PROC"
+      - "SVC_KV_DB"

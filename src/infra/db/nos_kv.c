@@ -33,11 +33,34 @@ static uint32_t murmurhash3_32(const void *key, int len, uint32_t seed) {
     return h1;
 }
 
+#define MAX_TABLES 32
+static nos_kv_table_t* g_tables[MAX_TABLES];
+static int g_table_count = 0;
+static pthread_mutex_t g_table_mgr_lock = PTHREAD_MUTEX_INITIALIZER;
+
 nos_kv_table_t* nos_kv_table_create(const char *name, uint32_t key_size, uint32_t max_val_size, uint32_t capacity) {
     if (!name || key_size == 0 || capacity == 0) return NULL;
 
+    pthread_mutex_lock(&g_table_mgr_lock);
+    /* 1. 检查是否已存在同名表 */
+    for (int i = 0; i < g_table_count; i++) {
+        if (strcmp(g_tables[i]->name, name) == 0) {
+            pthread_mutex_unlock(&g_table_mgr_lock);
+            return g_tables[i];
+        }
+    }
+
+    /* 2. 创建新表 */
+    if (g_table_count >= MAX_TABLES) {
+        pthread_mutex_unlock(&g_table_mgr_lock);
+        return NULL;
+    }
+
     nos_kv_table_t *table = calloc(1, sizeof(nos_kv_table_t));
-    if (!table) return NULL;
+    if (!table) {
+        pthread_mutex_unlock(&g_table_mgr_lock);
+        return NULL;
+    }
 
     strncpy(table->name, name, 31);
     table->key_size = key_size;
@@ -45,7 +68,6 @@ nos_kv_table_t* nos_kv_table_create(const char *name, uint32_t key_size, uint32_
     table->capacity = capacity;
     table->entry_size = sizeof(nos_kv_entry_t) + key_size + max_val_size;
     
-    /* 桶数量取容量的 1.5 倍并向上取整到 2 的幂 (简单起见此处固定或根据容量计算) */
     table->bucket_count = 1024; 
     while (table->bucket_count < capacity) table->bucket_count <<= 1;
 
@@ -55,7 +77,6 @@ nos_kv_table_t* nos_kv_table_create(const char *name, uint32_t key_size, uint32_
         table->buckets[i].first_idx = KV_INVALID_IDX;
     }
 
-    /* 预分配条目池 */
     table->pool_mem = calloc(capacity, table->entry_size);
     table->free_stack = malloc(sizeof(uint32_t) * capacity);
     table->free_top = -1;
@@ -65,6 +86,9 @@ nos_kv_table_t* nos_kv_table_create(const char *name, uint32_t key_size, uint32_
 
     nos_sys_log_info("KV Table '%s' created: KeySize=%u, MaxVal=%u, Capacity=%u, Mem=%u KB", 
                      name, key_size, max_val_size, capacity, (capacity * table->entry_size) / 1024);
+
+    g_tables[g_table_count++] = table;
+    pthread_mutex_unlock(&g_table_mgr_lock);
     return table;
 }
 
@@ -81,12 +105,10 @@ nos_status_t nos_kv_put(nos_kv_table_t *table, const void *key, const void *val,
 
     pthread_rwlock_wrlock(&bucket->lock);
 
-    /* 查找是否存在 */
     uint32_t curr_idx = bucket->first_idx;
     while (curr_idx != KV_INVALID_IDX) {
         nos_kv_entry_t *entry = get_entry(table, curr_idx);
         if (memcmp(entry->data, key, table->key_size) == 0) {
-            /* 存在则更新 */
             if (val) memcpy(entry->data + table->key_size, val, val_len);
             entry->val_len = val_len;
             pthread_rwlock_unlock(&bucket->lock);
@@ -95,10 +117,9 @@ nos_status_t nos_kv_put(nos_kv_table_t *table, const void *key, const void *val,
         curr_idx = entry->next_idx;
     }
 
-    /* 不存在，申请新节点 */
     if (table->free_top < 0) {
         pthread_rwlock_unlock(&bucket->lock);
-        return NOS_ERR_BUSY; // 池满
+        return NOS_ERR_BUSY;
     }
 
     uint32_t new_idx = table->free_stack[table->free_top--];
@@ -108,7 +129,6 @@ nos_status_t nos_kv_put(nos_kv_table_t *table, const void *key, const void *val,
     if (val) memcpy(new_entry->data + table->key_size, val, val_len);
     new_entry->val_len = val_len;
     
-    /* 插入链表头 */
     new_entry->next_idx = bucket->first_idx;
     bucket->first_idx = new_idx;
     table->used_count++;
@@ -161,7 +181,6 @@ nos_status_t nos_kv_get_ptr(nos_kv_table_t *table, const void *key, const void *
             h->lock = &bucket->lock;
             *out_handle = h;
             
-            /* 注意：此处不释放读锁，由 release_ptr 释放 */
             return NOS_OK;
         }
         curr_idx = entry->next_idx;
@@ -192,11 +211,9 @@ nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key) {
     while (curr_idx != KV_INVALID_IDX) {
         nos_kv_entry_t *entry = get_entry(table, curr_idx);
         if (memcmp(entry->data, key, table->key_size) == 0) {
-            /* 从链表移除 */
             if (prev_idx == KV_INVALID_IDX) bucket->first_idx = entry->next_idx;
             else get_entry(table, prev_idx)->next_idx = entry->next_idx;
 
-            /* 归还内存池 */
             table->free_stack[++table->free_top] = curr_idx;
             table->used_count--;
 
@@ -216,4 +233,18 @@ void nos_kv_table_dump(nos_kv_table_t *table) {
     nos_sys_log_info("KV Table '%s' Stats: Capacity=%u, Used=%u (%.1f%%)", 
                      table->name, table->capacity, table->used_count, 
                      (float)table->used_count * 100 / table->capacity);
+}
+
+static nos_kv_ops_t g_kv_ops = {
+    .table_create = nos_kv_table_create,
+    .put = nos_kv_put,
+    .get = nos_kv_get,
+    .get_ptr = nos_kv_get_ptr,
+    .release_ptr = nos_kv_release_ptr,
+    .del = nos_kv_del
+};
+
+void nos_kv_db_init(void) {
+    extern nos_status_t nos_embedded_service_register(const char *name, void *ops);
+    nos_embedded_service_register("SVC_KV_DB", &g_kv_ops);
 }

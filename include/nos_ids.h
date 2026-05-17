@@ -10,6 +10,7 @@
 
 /* Service IDs */
 #define SVC_LOG              1
+#define SVC_KV_DB            2
 #define SVC_MGMT             101
 #define SVC_ROUTING_V4       102
 #define SVC_ROUTING_V6       105

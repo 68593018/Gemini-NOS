@@ -46,8 +46,20 @@ void nos_kv_release_ptr(void *handle);
 nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key);
 
 /**
- * @brief 打印表统计信息
+ * @brief KV 服务操作接口 (API Table)
  */
-void nos_kv_table_dump(nos_kv_table_t *table);
+typedef struct {
+    nos_kv_table_t* (*table_create)(const char *name, uint32_t key_size, uint32_t max_val_size, uint32_t capacity);
+    nos_status_t    (*put)(nos_kv_table_t *table, const void *key, const void *val, uint32_t val_len);
+    nos_status_t    (*get)(nos_kv_table_t *table, const void *key, void *val_buf, uint32_t *val_len);
+    nos_status_t    (*get_ptr)(nos_kv_table_t *table, const void *key, const void **out_ptr, uint32_t *out_len, void **out_handle);
+    void            (*release_ptr)(void *handle);
+    nos_status_t    (*del)(nos_kv_table_t *table, const void *key);
+} nos_kv_ops_t;
+
+/**
+ * @brief 内部接口：初始化 KV 数据库引擎并注册服务
+ */
+void nos_kv_db_init(void);
 
 #endif /* __NOS_KV_API_H__ */
