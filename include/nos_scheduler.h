@@ -91,6 +91,11 @@ void nos_scheduler_stop(nos_thread_t *thread);
 nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const char *name);
 
 /**
+ * @brief 清理线程调度器资源
+ */
+void nos_scheduler_deinit_thread(nos_thread_t *thread);
+
+/**
  * @brief 获取所有线程调度器总内存占用 (Byte)
  */
 size_t nos_scheduler_get_total_mem_usage(void);

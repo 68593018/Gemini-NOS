@@ -76,11 +76,17 @@ typedef struct {
     void            (*release_ptr)(void *handle);
     nos_status_t    (*del)(nos_kv_table_t *table, const void *key);
     nos_status_t    (*subscribe)(nos_kv_table_t *table, const void *key, nos_kv_notify_fn notify, void *arg);
+    nos_status_t    (*unsubscribe)(nos_kv_table_t *table, const void *key, nos_kv_notify_fn notify, void *arg);
 } nos_kv_ops_t;
 
 /**
  * @brief 内部接口：初始化 KV 数据库引擎并注册服务
  */
 void nos_kv_db_init(void);
+
+/**
+ * @brief 内部接口：释放所有 KV 数据库资源
+ */
+void nos_kv_db_deinit(void);
 
 #endif /* __NOS_KV_API_H__ */

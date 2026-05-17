@@ -38,6 +38,11 @@ typedef struct {
 nos_status_t nos_buffer_init_pool(const nos_buffer_pool_def_t *config);
 
 /**
+ * @brief 释放所有 Buffer 池资源
+ */
+void nos_buffer_deinit_pool(void);
+
+/**
  * @brief 从池中申请一个最匹配大小的 Buffer
  * @param size 业务需要的最小字节数
  * @param headroom 预留的头部字节数 (用于协议头封装)

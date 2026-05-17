@@ -39,6 +39,7 @@ typedef struct {
 
     pthread_t consumer_tid;
     _Atomic unsigned long dropped_count;
+    _Atomic int keep_running;
     int initialized;
 } nos_log_context_t;
 
@@ -47,6 +48,7 @@ static nos_log_context_t g_log_ctx = {
     .read_idx = 0,
     .global_filter_level = NOS_LOG_LEVEL_DEBUG,
     .dropped_count = 0,
+    .keep_running = 1,
     .initialized = 0
 };
 
@@ -62,9 +64,9 @@ static const char* level_to_str(nos_log_level_t level) {
 
 static void* nos_log_consumer_thread(void *arg) {
     nos_log_context_t *ctx = &g_log_ctx;
-    while (1) {
+    while (atomic_load(&ctx->keep_running) || atomic_load(&ctx->ring[ctx->read_idx % LOG_BUFFER_SIZE].ready) == 2) {
         nos_log_entry_t *entry = &ctx->ring[ctx->read_idx % LOG_BUFFER_SIZE];
-        if (atomic_load(&entry->ready) == 1) {
+        if (atomic_load(&entry->ready) == 2) { // Ready to read
             const char *name = "System";
             if (entry->comp_id > 0 && entry->comp_id < MAX_COMP_ID) {
                 if (ctx->comp_info[entry->comp_id].is_registered) {
@@ -74,7 +76,7 @@ static void* nos_log_consumer_thread(void *arg) {
             printf("[%s] [%s] [%-8s] %s\n", 
                    entry->time_str, level_to_str(entry->level), name, entry->message);
             fflush(stdout);
-            atomic_store(&entry->ready, 0);
+            atomic_store(&entry->ready, 0); // Back to empty
             ctx->read_idx++;
         } else {
             usleep(1000); // 1ms sleep to yield CPU
@@ -98,8 +100,13 @@ static void nos_log_impl(nos_log_level_t level, uint32_t comp_id, const char *fm
     unsigned int idx = atomic_fetch_add(&ctx->write_idx, 1) % LOG_BUFFER_SIZE;
     nos_log_entry_t *entry = &ctx->ring[idx];
 
-    // Industrial Grade: Non-blocking discard policy to protect business performance
-    if (atomic_load(&entry->ready) == 1) {
+    /* 
+     * Industrial Grade: Triple-state CAS (Empty -> Writing -> Ready) 
+     * to prevent race conditions during rapid wrap-around.
+     */
+    int expected = 0; // Empty
+    if (!atomic_compare_exchange_strong(&entry->ready, &expected, 1)) {
+        // Slot is either already being written (1) or full (2)
         atomic_fetch_add(&ctx->dropped_count, 1);
         return;
     }
@@ -116,7 +123,19 @@ static void nos_log_impl(nos_log_level_t level, uint32_t comp_id, const char *fm
     vsnprintf(entry->message, sizeof(entry->message), fmt, args);
     va_end(args);
 
-    atomic_store(&entry->ready, 1);
+    atomic_store(&entry->ready, 2); // Mark as Ready
+}
+
+void nos_log_deinit(void) {
+    nos_log_context_t *ctx = &g_log_ctx;
+    if (!ctx->initialized) return;
+
+    atomic_store(&ctx->keep_running, 0);
+    
+    /* Wait for consumer thread to finish and join */
+    pthread_join(ctx->consumer_tid, NULL);
+    
+    ctx->initialized = 0;
 }
 
 static void nos_set_level_impl(nos_log_level_t level) {
@@ -161,8 +180,8 @@ void nos_log_init(void) {
         atomic_init(&ctx->ring[i].ready, 0);
     }
 
+    atomic_store(&ctx->keep_running, 1);
     pthread_create(&ctx->consumer_tid, NULL, nos_log_consumer_thread, NULL);
-    pthread_detach(ctx->consumer_tid);
 
     extern nos_status_t nos_embedded_service_register(const char *name, void *ops);
     nos_embedded_service_register("SVC_LOG", &g_log_ops);

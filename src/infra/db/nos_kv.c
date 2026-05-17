@@ -112,14 +112,24 @@ nos_status_t nos_kv_put(nos_kv_table_t *table, const void *key, const void *val,
             if (val) memcpy(entry->data + table->key_size, val, val_len);
             entry->val_len = val_len;
 
-            /* Notify subscribers */
+            /* collect subscribers for notification outside of lock to avoid deadlock */
             nos_kv_sub_t *sub = entry->sub_list;
-            while (sub) {
-                sub->notify(table, key, val, val_len, sub->arg);
-                sub = sub->next;
+            int sub_count = 0;
+            while (sub) { sub_count++; sub = sub->next; }
+            
+            if (sub_count > 0) {
+                nos_kv_sub_t **subs = malloc(sizeof(nos_kv_sub_t *) * sub_count);
+                sub = entry->sub_list;
+                for (int i = 0; i < sub_count; i++) { subs[i] = sub; sub = sub->next; }
+                
+                pthread_rwlock_unlock(&bucket->lock);
+                for (int i = 0; i < sub_count; i++) {
+                    subs[i]->notify(table, key, val, val_len, subs[i]->arg);
+                }
+                free(subs);
+            } else {
+                pthread_rwlock_unlock(&bucket->lock);
             }
-
-            pthread_rwlock_unlock(&bucket->lock);
             return NOS_OK;
         }
         curr_idx = entry->next_idx;
@@ -218,6 +228,16 @@ nos_status_t nos_kv_subscribe(nos_kv_table_t *table, const void *key, nos_kv_not
     while (curr_idx != KV_INVALID_IDX) {
         nos_kv_entry_t *entry = get_entry(table, curr_idx);
         if (memcmp(entry->data, key, table->key_size) == 0) {
+            /* Check if already subscribed to avoid duplicates */
+            nos_kv_sub_t *curr = entry->sub_list;
+            while (curr) {
+                if (curr->notify == notify && curr->arg == arg) {
+                    pthread_rwlock_unlock(&bucket->lock);
+                    return NOS_OK;
+                }
+                curr = curr->next;
+            }
+
             nos_kv_sub_t *sub = malloc(sizeof(nos_kv_sub_t));
             sub->notify = notify;
             sub->arg = arg;
@@ -225,6 +245,40 @@ nos_status_t nos_kv_subscribe(nos_kv_table_t *table, const void *key, nos_kv_not
             entry->sub_list = sub;
             pthread_rwlock_unlock(&bucket->lock);
             return NOS_OK;
+        }
+        curr_idx = entry->next_idx;
+    }
+
+    pthread_rwlock_unlock(&bucket->lock);
+    return NOS_ERR;
+}
+
+nos_status_t nos_kv_unsubscribe(nos_kv_table_t *table, const void *key, nos_kv_notify_fn notify, void *arg) {
+    if (!table || !key || !notify) return NOS_ERR;
+
+    uint32_t hash = murmurhash3_32(key, table->key_size, 0);
+    nos_kv_bucket_t *bucket = &table->buckets[hash % table->bucket_count];
+
+    pthread_rwlock_wrlock(&bucket->lock);
+
+    uint32_t curr_idx = bucket->first_idx;
+    while (curr_idx != KV_INVALID_IDX) {
+        nos_kv_entry_t *entry = get_entry(table, curr_idx);
+        if (memcmp(entry->data, key, table->key_size) == 0) {
+            nos_kv_sub_t *prev = NULL;
+            nos_kv_sub_t *curr = entry->sub_list;
+            while (curr) {
+                if (curr->notify == notify && curr->arg == arg) {
+                    if (prev) prev->next = curr->next;
+                    else entry->sub_list = curr->next;
+                    free(curr);
+                    pthread_rwlock_unlock(&bucket->lock);
+                    return NOS_OK;
+                }
+                prev = curr;
+                curr = curr->next;
+            }
+            break;
         }
         curr_idx = entry->next_idx;
     }
@@ -317,10 +371,46 @@ static nos_kv_ops_t g_kv_ops = {
     .get_ptr = nos_kv_get_ptr,
     .release_ptr = nos_kv_release_ptr,
     .del = nos_kv_del,
-    .subscribe = nos_kv_subscribe
+    .subscribe = nos_kv_subscribe,
+    .unsubscribe = nos_kv_unsubscribe
 };
 
 void nos_kv_db_init(void) {
     extern nos_status_t nos_embedded_service_register(const char *name, void *ops);
     nos_embedded_service_register("SVC_KV_DB", &g_kv_ops);
+}
+
+void nos_kv_db_deinit(void) {
+    pthread_mutex_lock(&g_table_mgr_lock);
+    for (int i = 0; i < g_table_count; i++) {
+        nos_kv_table_t *t = g_tables[i];
+
+        /* 1. 释放所有桶的锁和订阅者 */
+        for (uint32_t b = 0; b < t->bucket_count; b++) {
+            pthread_rwlock_wrlock(&t->buckets[b].lock);
+            uint32_t curr_idx = t->buckets[b].first_idx;
+            while (curr_idx != KV_INVALID_IDX) {
+                nos_kv_entry_t *entry = get_entry(t, curr_idx);
+                nos_kv_sub_t *sub = entry->sub_list;
+                while (sub) {
+                    nos_kv_sub_t *next = sub->next;
+                    free(sub);
+                    sub = next;
+                }
+                curr_idx = entry->next_idx;
+            }
+            pthread_rwlock_unlock(&t->buckets[b].lock);
+            pthread_rwlock_destroy(&t->buckets[b].lock);
+        }
+
+        /* 2. 释放表级动态内存 */
+        free(t->buckets);
+        free(t->pool_mem);
+        free(t->free_stack);
+        free(t);
+        g_tables[i] = NULL;
+    }
+    g_table_count = 0;
+    pthread_mutex_unlock(&g_table_mgr_lock);
+    nos_sys_log_debug("KV database engine deinitialized.");
 }

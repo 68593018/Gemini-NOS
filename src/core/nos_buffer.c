@@ -73,6 +73,20 @@ nos_status_t nos_buffer_init_pool(const nos_buffer_pool_def_t *config) {
     return NOS_OK;
 }
 
+void nos_buffer_deinit_pool(void) {
+    pthread_mutex_lock(&g_buffer_lock);
+    for (uint32_t i = 0; i < g_bin_count; i++) {
+        nos_buffer_bin_t *bin = &g_bins[i];
+        if (bin->buffers) free(bin->buffers);
+        if (bin->raw_mem) free(bin->raw_mem);
+        if (bin->free_stack) free(bin->free_stack);
+        memset(bin, 0, sizeof(nos_buffer_bin_t));
+    }
+    g_bin_count = 0;
+    pthread_mutex_unlock(&g_buffer_lock);
+    nos_sys_log_debug("Buffer pool deinitialized.");
+}
+
 nos_buffer_t* nos_buffer_alloc(uint32_t size, uint32_t headroom) {
     nos_buffer_t *buf = NULL;
     uint32_t total_needed = size + headroom;

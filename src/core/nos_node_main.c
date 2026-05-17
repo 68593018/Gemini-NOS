@@ -83,9 +83,26 @@ int main(int argc, char *argv[]) {
         free(g_node_ctx.loaded_info[i].comp);
         dlclose(g_node_ctx.loaded_info[i].handle);
     }
+
+    /* 9. 释放调度器内部资源 */
+    nos_scheduler_deinit_thread(g_node_ctx.mgmt_thread);
+    for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) {
+        nos_scheduler_deinit_thread(&g_node_ctx.worker_threads[i]);
+    }
+
+    /* 10. 释放 Buffer 池 */
+    nos_buffer_deinit_pool();
+
+    /* 11. 释放 KV 数据库 */
+    nos_kv_db_deinit();
+
+    nos_sys_log_info("Shutdown complete.");
+
+    /* 12. 释放日志系统 */
+    nos_log_deinit();
+
     free(g_node_ctx.mgmt_thread);
     free(g_node_ctx.worker_threads);
 
-    nos_sys_log_info("Shutdown complete.");
     return 0;
 }

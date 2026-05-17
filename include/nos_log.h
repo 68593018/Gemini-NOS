@@ -47,6 +47,11 @@ void nos_log_set_comp_info(uint32_t comp_id, const char *name);
 void nos_log_init(void);
 
 /**
+ * @brief 内部接口：清理并关闭日志引擎
+ */
+void nos_log_deinit(void);
+
+/**
  * @brief 内部接口：获取日志系统内存占用 (Byte)
  */
 size_t nos_log_get_mem_usage(void);

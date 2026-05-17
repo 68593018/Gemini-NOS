@@ -148,6 +148,38 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     return NOS_OK;
 }
 
+void nos_scheduler_deinit_thread(nos_thread_t *thread) {
+    if (!thread) return;
+
+    /* 1. 释放 FDs 和 epoll */
+    close(thread->epoll_fd);
+    close(thread->notify_fd[0]);
+    close(thread->notify_fd[1]);
+
+    /* 2. 释放内部队列的消息 (如果有) */
+    pthread_mutex_lock(&thread->queue_lock);
+    while (thread->head != thread->tail) {
+        nos_buffer_release(thread->msg_queue[thread->head]);
+        thread->head = (thread->head + 1) % MAX_QUEUE_SIZE;
+    }
+    pthread_mutex_unlock(&thread->queue_lock);
+    pthread_mutex_destroy(&thread->queue_lock);
+
+    /* 3. 释放定时器堆中的定时器 (由框架创建的容器，内部 timer 需由组件释放或在此兜底) */
+    /* 注意：工业级实现中，定时器通常由组件管理，此处仅释放容器数组 */
+    for (uint32_t i = 0; i < thread->timer_heap.size; i++) {
+        // nos_timer_delete(thread->timer_heap.nodes[i]); // 不能盲目删除，可能已被组件 delete
+    }
+
+    /* 4. 释放动态内存 */
+    if (thread->components) free(thread->components);
+    if (thread->fd_entries) free(thread->fd_entries);
+    if (thread->msg_queue)  free(thread->msg_queue);
+    if (thread->timer_heap.nodes) free(thread->timer_heap.nodes);
+    
+    nos_sys_log_debug("Scheduler thread resources for '%s' released.", thread->name);
+}
+
 static nos_thread_t* find_thread_of_component(nos_component_t *comp) {
     extern nos_node_ctx_t g_node_ctx;
     if (g_node_ctx.mgmt_thread) {

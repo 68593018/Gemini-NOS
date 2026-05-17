@@ -88,9 +88,16 @@ static nos_status_t comp_start(nos_component_t *self) {
 
 static void comp_stop(nos_component_t *self) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
-    if (ctx && ctx->heartbeat_timer) {
-        nos_timer_delete_auto(ctx->heartbeat_timer);
-        ctx->heartbeat_timer = NULL;
+    if (ctx) {
+        if (ctx->heartbeat_timer) {
+            nos_timer_delete_auto(ctx->heartbeat_timer);
+            ctx->heartbeat_timer = NULL;
+        }
+        if (ctx->comp2_state_table) {
+            char key[32] = "Comp-2";
+            nos_kv_unsubscribe_auto(ctx->comp2_state_table, key, on_comp2_state_change, self);
+            ctx->comp2_state_table = NULL;
+        }
     }
     if (self->priv) { free(self->priv); self->priv = NULL; }
 }
