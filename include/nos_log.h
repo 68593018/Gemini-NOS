@@ -29,6 +29,11 @@ typedef struct {
      * @brief 设置全局过滤级别
      */
     void (*set_filter_level)(nos_log_level_t level);
+
+    /**
+     * @brief 设置特定组件的过滤级别
+     */
+    void (*set_comp_level)(const char *comp_name, nos_log_level_t level);
 } nos_log_ops_t;
 
 /**
