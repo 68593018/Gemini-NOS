@@ -5,6 +5,7 @@
 #include "nos_node_mgr.h"
 #include "nos_node_priv.h"
 #include "nos_service.h"
+#include "nos_api.h"
 
 /* 外部函数声明 (由 nos_ipc_p2p.c 提供) */
 nos_status_t nos_ipc_init(nos_thread_t *thread, const char *uds_path);
@@ -18,13 +19,13 @@ static nos_component_t* node_load_component_internal(uint32_t id, const char *na
 
     void *handle = dlopen(lib_path, RTLD_NOW);
     if (!handle) {
-        fprintf(stderr, "[Node] Failed to load %s: %s\n", lib_path, dlerror());
+        nos_sys_log_error("Failed to load %s: %s", lib_path, dlerror());
         return NULL;
     }
 
     nos_comp_export_func_t export_func = (nos_comp_export_func_t)dlsym(handle, "nos_export_component");
     if (!export_func) {
-        fprintf(stderr, "[Node] Symbol 'nos_export_component' not found in %s\n", lib_path);
+        nos_sys_log_error("Symbol 'nos_export_component' not found in %s", lib_path);
         dlclose(handle);
         return NULL;
     }
@@ -34,13 +35,13 @@ static nos_component_t* node_load_component_internal(uint32_t id, const char *na
     comp->name = strdup(name);
 
     if (export_func(comp) != NOS_OK) {
-        fprintf(stderr, "[Node] Component %s export failed\n", name);
+        nos_sys_log_error("Component %s export failed", name);
         free((void*)comp->name); free(comp); dlclose(handle);
         return NULL;
     }
 
     if (comp->init && comp->init(comp) != NOS_OK) {
-        fprintf(stderr, "[Node] Component %s init failed\n", name);
+        nos_sys_log_error("Component %s init failed", name);
         comp->status = NOS_COMP_ST_ERROR;
         free((void*)comp->name); free(comp); dlclose(handle);
         return NULL;
@@ -53,7 +54,7 @@ static nos_component_t* node_load_component_internal(uint32_t id, const char *na
     extern void nos_log_set_comp_info(uint32_t comp_id, const char *name);
     nos_log_set_comp_info(id, name);
 
-    printf("[Node] Loaded %s (ID:%u) from %s\n", name, id, lib_name);
+    nos_sys_log_info("Loaded %s (ID:%u) from %s", name, id, lib_name);
     return comp;
 }
 
@@ -116,7 +117,7 @@ void node_setup_routing(const char *current_node_name) {
             /* 远程服务注册 (直接使用清单中预生成的路径) */
             if (svc->remote_uds_path && strlen(svc->remote_uds_path) > 0) {
                 nos_service_register_remote(svc->service_id, svc->remote_uds_path);
-                printf("[Node] Routing: Remote Service %u -> %s (%s)\n", 
+                nos_sys_log_info("Routing: Remote Service %u -> %s (%s)", 
                        svc->service_id, svc->node_name, svc->remote_uds_path);
             }
         }
@@ -147,7 +148,7 @@ nos_status_t node_unload_component(const char *name) {
 
     for (uint32_t i = idx; i < g_node_ctx.loaded_count - 1; i++) g_node_ctx.loaded_info[i] = g_node_ctx.loaded_info[i+1];
     g_node_ctx.loaded_count--;
-    printf("[Node] Component %s unloaded.\n", name);
+    nos_sys_log_info("Component %s unloaded.", name);
     return NOS_OK;
 }
 

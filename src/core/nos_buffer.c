@@ -3,6 +3,7 @@
 #include <string.h>
 #include <pthread.h>
 #include "nos_buffer.h"
+#include "nos_api.h"
 
 #define MAX_BINS 8
 #define CACHE_LINE_SIZE 64
@@ -65,7 +66,7 @@ nos_status_t nos_buffer_init_pool(const nos_buffer_pool_def_t *config) {
             bin->free_stack[++bin->free_top] = j;
         }
         g_bin_count++;
-        printf("[Buffer] Bin[%d] initialized: %u bytes * %u chunks (Aligned to %d)\n", 
+        nos_sys_log_info("Buffer Bin[%d] initialized: %u bytes * %u chunks (Aligned to %d)", 
                i, bin->chunk_size, bin->chunk_count, CACHE_LINE_SIZE);
     }
     pthread_mutex_unlock(&g_buffer_lock);
@@ -97,7 +98,7 @@ nos_buffer_t* nos_buffer_alloc(uint32_t size, uint32_t headroom) {
     pthread_mutex_unlock(&g_buffer_lock);
     
     if (!buf) {
-        printf("[Buffer] Warning: Allocation failed for size %u + headroom %u\n", size, headroom);
+        nos_sys_log_warn("Buffer allocation failed for size %u + headroom %u", size, headroom);
     }
     return buf;
 }
@@ -144,14 +145,13 @@ void* nos_buffer_pull(nos_buffer_t *buf, uint32_t size) {
 }
 
 void nos_buffer_dump_stats(void) {
-    printf("\n--- NOS Buffer Pool Statistics ---\n");
-    printf("%-5s %-12s %-8s %-8s %-8s\n", "Bin", "ChunkSize", "Total", "Used", "Peak");
+    nos_sys_log_info("--- NOS Buffer Pool Statistics ---");
+    nos_sys_log_info("%-5s %-12s %-8s %-8s %-8s", "Bin", "ChunkSize", "Total", "Used", "Peak");
     pthread_mutex_lock(&g_buffer_lock);
     for (uint32_t i = 0; i < g_bin_count; i++) {
         nos_buffer_bin_t *bin = &g_bins[i];
-        printf("[%2d] %-12u %-8u %-8u %-8u\n", 
+        nos_sys_log_info("[%2d] %-12u %-8u %-8u %-8u", 
                i, bin->chunk_size, bin->chunk_count, bin->used_count, bin->peak_count);
     }
     pthread_mutex_unlock(&g_buffer_lock);
-    printf("----------------------------------\n\n");
 }
