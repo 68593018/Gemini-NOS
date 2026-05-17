@@ -15,12 +15,12 @@ typedef struct {
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
     ctx->local_counter++;
-    nos_log_info(self->name, "Msg received, counter: %d", ctx->local_counter);
+    nos_log_info(self, "Msg received, counter: %d", ctx->local_counter);
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
     self->priv = calloc(1, sizeof(comp_ctx_t));
-    nos_log_debug(self->name, "Context initialized via Auto-Injection");
+    nos_log_debug(self, "Context initialized via Auto-Injection");
     return NOS_OK;
 }
 

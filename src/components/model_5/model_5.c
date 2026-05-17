@@ -15,13 +15,13 @@ typedef struct {
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
     ctx->counter++;
-    nos_log_info(self->name, "RECEIVED (Total: %d): From Component %u, MsgCode %u", 
+    nos_log_info(self, "RECEIVED (Total: %d): From Component %u, MsgCode %u", 
                  ctx->counter, msg->src_component, msg->msg_code);
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
     self->priv = calloc(1, sizeof(comp_ctx_t));
-    nos_log_debug(self->name, "Model 5 (Instance of Model 2 code) initialized");
+    nos_log_debug(self, "Model 5 (Instance of Model 2 code) initialized");
     return NOS_OK;
 }
 

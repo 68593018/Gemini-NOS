@@ -48,6 +48,11 @@ static nos_component_t* node_load_component_internal(uint32_t id, const char *na
 
     comp->status = NOS_COMP_ST_INITED;
     *out_handle = handle;
+    
+    /* 自动同步组件信息到日志系统 (ID -> Name 映射) */
+    extern void nos_log_set_comp_info(uint32_t comp_id, const char *name);
+    nos_log_set_comp_info(id, name);
+
     printf("[Node] Loaded %s (ID:%u) from %s\n", name, id, lib_name);
     return comp;
 }

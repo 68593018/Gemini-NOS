@@ -13,12 +13,12 @@ typedef struct {
 } comp_ctx_t;
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
-    nos_log_info(self->name, "Received msg from Comp %u, Code %u", msg->src_component, msg->msg_code);
+    nos_log_info(self, "Received msg from Comp %u, Code %u", msg->src_component, msg->msg_code);
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
     self->priv = calloc(1, sizeof(comp_ctx_t));
-    nos_log_debug(self->name, "Model 3 initialized");
+    nos_log_debug(self, "Model 3 initialized");
     return NOS_OK;
 }
 

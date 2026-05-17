@@ -5,24 +5,26 @@
 #include <stdatomic.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdlib.h>
 #include "nos_log.h"
 
 #define LOG_BUFFER_SIZE 1024
 #define LOG_MSG_MAX 256
-#define MAX_COMP_FILTERS 32
+#define MAX_COMP_ID 256
 
 typedef struct {
     nos_log_level_t level;
-    char comp_name[32];
+    uint32_t comp_id;
     char time_str[16];
     char message[LOG_MSG_MAX];
     atomic_int ready;
 } nos_log_entry_t;
 
 typedef struct {
-    const char *name;
-    nos_log_level_t level;
-} nos_comp_filter_t;
+    char name[32];
+    nos_log_level_t filter_level;
+    int is_registered;
+} nos_comp_info_t;
 
 /**
  * @brief 日志系统内部上下文
@@ -33,9 +35,7 @@ typedef struct {
     uint32_t read_idx;
 
     nos_log_level_t global_filter_level;
-    nos_comp_filter_t comp_filters[MAX_COMP_FILTERS];
-    int comp_filter_count;
-    pthread_mutex_t filter_lock;
+    nos_comp_info_t comp_info[MAX_COMP_ID];
 
     pthread_t consumer_tid;
     int initialized;
@@ -45,8 +45,6 @@ static nos_log_context_t g_log_ctx = {
     .write_idx = 0,
     .read_idx = 0,
     .global_filter_level = NOS_LOG_LEVEL_DEBUG,
-    .comp_filter_count = 0,
-    .filter_lock = PTHREAD_MUTEX_INITIALIZER,
     .initialized = 0
 };
 
@@ -65,8 +63,14 @@ static void* nos_log_consumer_thread(void *arg) {
     while (1) {
         nos_log_entry_t *entry = &ctx->ring[ctx->read_idx % LOG_BUFFER_SIZE];
         if (atomic_load(&entry->ready) == 1) {
+            const char *name = "System";
+            if (entry->comp_id > 0 && entry->comp_id < MAX_COMP_ID) {
+                if (ctx->comp_info[entry->comp_id].is_registered) {
+                    name = ctx->comp_info[entry->comp_id].name;
+                }
+            }
             printf("[%s] [%s] [%-8s] %s\n", 
-                   entry->time_str, level_to_str(entry->level), entry->comp_name, entry->message);
+                   entry->time_str, level_to_str(entry->level), name, entry->message);
             fflush(stdout);
             atomic_store(&entry->ready, 0);
             ctx->read_idx++;
@@ -77,19 +81,14 @@ static void* nos_log_consumer_thread(void *arg) {
     return NULL;
 }
 
-static void nos_log_impl(nos_log_level_t level, const char *comp_name, const char *fmt, ...) {
+static void nos_log_impl(nos_log_level_t level, uint32_t comp_id, const char *fmt, ...) {
     nos_log_context_t *ctx = &g_log_ctx;
     nos_log_level_t filter_level = ctx->global_filter_level;
 
-    if (comp_name) {
-        pthread_mutex_lock(&ctx->filter_lock);
-        for (int i = 0; i < ctx->comp_filter_count; i++) {
-            if (strcmp(ctx->comp_filters[i].name, comp_name) == 0) {
-                filter_level = ctx->comp_filters[i].level;
-                break;
-            }
+    if (comp_id > 0 && comp_id < MAX_COMP_ID) {
+        if (ctx->comp_info[comp_id].is_registered) {
+            filter_level = ctx->comp_info[comp_id].filter_level;
         }
-        pthread_mutex_unlock(&ctx->filter_lock);
     }
 
     if (level < filter_level) return;
@@ -103,7 +102,7 @@ static void nos_log_impl(nos_log_level_t level, const char *comp_name, const cha
     }
 
     entry->level = level;
-    strncpy(entry->comp_name, comp_name ? comp_name : "System", sizeof(entry->comp_name) - 1);
+    entry->comp_id = comp_id;
     
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -119,30 +118,25 @@ static void nos_log_impl(nos_log_level_t level, const char *comp_name, const cha
 
 static void nos_set_level_impl(nos_log_level_t level) {
     g_log_ctx.global_filter_level = level;
-    nos_log_impl(NOS_LOG_LEVEL_INFO, "Log", "Global filter level set to %s", level_to_str(level));
+    nos_log_impl(NOS_LOG_LEVEL_INFO, 0, "Global filter level set to %s", level_to_str(level));
 }
 
-static void nos_set_comp_level_impl(const char *comp_name, nos_log_level_t level) {
-    if (!comp_name) return;
+static void nos_set_comp_level_impl(uint32_t comp_id, nos_log_level_t level) {
+    if (comp_id == 0 || comp_id >= MAX_COMP_ID) return;
     nos_log_context_t *ctx = &g_log_ctx;
 
-    pthread_mutex_lock(&ctx->filter_lock);
-    int found = 0;
-    for (int i = 0; i < ctx->comp_filter_count; i++) {
-        if (strcmp(ctx->comp_filters[i].name, comp_name) == 0) {
-            ctx->comp_filters[i].level = level;
-            found = 1;
-            break;
-        }
-    }
-    if (!found && ctx->comp_filter_count < MAX_COMP_FILTERS) {
-        ctx->comp_filters[ctx->comp_filter_count].name = strdup(comp_name);
-        ctx->comp_filters[ctx->comp_filter_count].level = level;
-        ctx->comp_filter_count++;
-    }
-    pthread_mutex_unlock(&ctx->filter_lock);
+    ctx->comp_info[comp_id].filter_level = level;
     
-    nos_log_impl(NOS_LOG_LEVEL_INFO, "Log", "Component [%s] filter level set to %s", comp_name, level_to_str(level));
+    nos_log_impl(NOS_LOG_LEVEL_INFO, 0, "Component ID [%u] filter level set to %s", comp_id, level_to_str(level));
+}
+
+void nos_log_set_comp_info(uint32_t comp_id, const char *name) {
+    if (comp_id == 0 || comp_id >= MAX_COMP_ID || !name) return;
+    nos_log_context_t *ctx = &g_log_ctx;
+
+    strncpy(ctx->comp_info[comp_id].name, name, sizeof(ctx->comp_info[comp_id].name) - 1);
+    ctx->comp_info[comp_id].filter_level = ctx->global_filter_level;
+    ctx->comp_info[comp_id].is_registered = 1;
 }
 
 static nos_log_ops_t g_log_ops = {
