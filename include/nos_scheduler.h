@@ -59,6 +59,16 @@ nos_status_t nos_scheduler_remove_fd(nos_thread_t *thread, int fd);
 nos_status_t nos_service_register_provider(uint32_t service_id, nos_component_t *provider);
 
 /**
+ * @brief 注册组件到线程调度器
+ */
+nos_status_t nos_scheduler_register_component(nos_thread_t *thread, nos_component_t *comp);
+
+/**
+ * @brief 启动调度循环
+ */
+nos_status_t nos_scheduler_run_loop(nos_thread_t *self);
+
+/**
  * @brief 初始化线程调度器对象
  */
 nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const char *name);

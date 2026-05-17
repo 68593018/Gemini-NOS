@@ -9,6 +9,8 @@
 #include "nos_manifest.h"
 #include "nos_buffer.h"
 
+#define MAX_WORKERS 8
+
 /* 外部函数声明 (由 nos_ipc_p2p.c 提供) */
 nos_status_t nos_ipc_init(nos_thread_t *thread, const char *uds_path);
 
@@ -21,32 +23,25 @@ static void* scheduler_thread_entry(void *arg) {
     return NULL;
 }
 
-int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s <node_name>\n", argv[0]);
-        return -1;
-    }
-
-    nos_buffer_init_pool();
-
-    const char *node_name = argv[1];
-    const nos_node_def_t *node_def = nos_manifest_get_node(node_name);
-    if (!node_def) {
-        printf("Error: Node '%s' not found in manifest.\n", node_name);
-        return -1;
-    }
-
-    printf("--- [NOS Node: %s] Master-Worker Architecture Starting ---\n", node_name);
-
-    /* 1. 【控制面】初始化专属管理线程 (Master) */
+/**
+ * @brief 初始化管理线程 (控制面)
+ */
+static nos_thread_t* node_init_mgmt(const char *uds_path) {
     nos_thread_t *mgmt_thread = malloc(sizeof(nos_thread_t));
     nos_scheduler_init_thread(mgmt_thread, 999, "Mgmt-Master");
+    
+    /* 将 IPC 监听绑定到管理线程 */
+    nos_ipc_init(mgmt_thread, uds_path);
+    printf("[Node] ControlPlane: IPC Listening on %s\n", uds_path);
+    return mgmt_thread;
+}
 
-    /* 2. 【数据面】根据清单初始化并启动工作线程池 (Workers) */
-    nos_thread_t *worker_threads = malloc(sizeof(nos_thread_t) * 8);
+/**
+ * @brief 根据清单初始化并启动工作线程池 (数据面)
+ */
+static int node_init_workers(const nos_node_def_t *node_def, nos_thread_t *worker_threads) {
     int worker_count = 0;
-
-    for (int i = 0; node_def->threads[i].name != NULL; i++) {
+    for (int i = 0; node_def->threads[i].name != NULL && i < MAX_WORKERS; i++) {
         const nos_thread_def_t *t_def = &node_def->threads[i];
         nos_scheduler_init_thread(&worker_threads[i], i, t_def->name);
         
@@ -60,14 +55,20 @@ int main(int argc, char *argv[]) {
         }
         worker_count++;
     }
+    return worker_count;
+}
 
-    /* 3. 自动化路由注册 (Master 与 Workers 联动) */
+/**
+ * @brief 自动化路由注册 (建立本地服务与 Worker 的绑定关系，或注册远端路由)
+ */
+static void node_setup_routing(const char *current_node_name, nos_thread_t *worker_threads, int worker_count) {
     uint32_t svc_count = 0;
     const nos_service_def_t *svc_list = nos_manifest_get_services(&svc_count);
+    
     for (uint32_t i = 0; i < svc_count; i++) {
         const nos_service_def_t *svc = &svc_list[i];
-        if (strcmp(svc->node_name, node_name) == 0) {
-            /* 本地服务：确定该组件位于哪个 Worker 线程 */
+        if (strcmp(svc->node_name, current_node_name) == 0) {
+            /* 本地服务路由：定位 Provider 所在的线程 */
             nos_component_t *provider = nos_get_component_by_id(svc->provider_comp_id);
             nos_thread_t *owner_worker = NULL;
             for (int t = 0; t < worker_count; t++) {
@@ -81,11 +82,11 @@ int main(int argc, char *argv[]) {
             }
             if (provider && owner_worker) {
                 nos_service_register_provider_bind(svc->service_id, provider, owner_worker);
-                printf("[Node] Routing: Service %u -> %s (on %s)\n", 
+                printf("[Node] Routing: Local Service %u -> %s (on %s)\n", 
                        svc->service_id, provider->name, owner_worker->name);
             }
         } else {
-            /* 远端服务注册路由 */
+            /* 远端服务路由注册 */
             const nos_node_def_t *remote_node = nos_manifest_get_node(svc->node_name);
             if (remote_node) {
                 nos_service_register_remote(svc->service_id, remote_node->uds_path);
@@ -94,39 +95,72 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+}
 
-    /* 4. 将 IPC 监听强绑定到管理线程 (控制面接收 IO) */
-    nos_ipc_init(mgmt_thread, node_def->uds_path);
-    printf("[Node] ControlPlane: IPC Listening on %s\n", node_def->uds_path);
-
-    /* 5. 启动所有物理线程 */
-    pthread_t mgmt_tid;
-    pthread_create(&mgmt_tid, NULL, scheduler_thread_entry, mgmt_thread);
-
-    pthread_t worker_tids[8];
-    for (int i = 0; i < worker_count; i++) {
-        pthread_create(&worker_tids[i], NULL, scheduler_thread_entry, &worker_threads[i]);
-    }
-
-    /* 6. 模拟业务触发 (测试用) */
+/**
+ * @brief 临时测试逻辑
+ */
+static void node_run_test_trigger(const char *node_name) {
     if (strcmp(node_name, "ProcA") == 0) {
         sleep(2);
-        printf("[Node] ProcA triggering Master-Worker initial test...\n");
+        printf("[Node] %s triggering initial service test...\n", node_name);
         nos_buffer_t *buf = nos_buffer_alloc();
         if (buf) {
             nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
             msg->magic = NOS_IPC_MAGIC;
             msg->version = NOS_IPC_VERSION;
-            msg->dst_service = 204;
+            msg->dst_service = 204; /* 假定 204 是远程或本地服务 ID */
             msg->src_component = 1;
             msg->msg_code = 1001;
             msg->payload_len = 32;
-            strcpy((char*)(buf->data + sizeof(nos_service_msg_t)), "Master-Worker Message");
+            strcpy((char*)(buf->data + sizeof(nos_service_msg_t)), "Ping from node_main");
             nos_service_msg_send(buf);
         }
     }
+}
 
+
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("Usage: %s <node_name>\n", argv[0]);
+        return -1;
+    }
+
+    const char *node_name = argv[1];
+    const nos_node_def_t *node_def = nos_manifest_get_node(node_name);
+    if (!node_def) {
+        printf("Error: Node '%s' not found in manifest.\n", node_name);
+        return -1;
+    }
+
+    printf("--- [NOS Node: %s] Starting ---\n", node_name);
+    nos_buffer_init_pool();
+
+    /* 1. 初始化管理线程 */
+    nos_thread_t *mgmt_thread = node_init_mgmt(node_def->uds_path);
+
+    /* 2. 初始化工作线程 */
+    nos_thread_t *worker_threads = malloc(sizeof(nos_thread_t) * MAX_WORKERS);
+    int worker_count = node_init_workers(node_def, worker_threads);
+
+    /* 3. 配置路由 */
+    node_setup_routing(node_name, worker_threads, worker_count);
+
+    /* 4. 物理线程启动 */
+    pthread_t mgmt_tid;
+    pthread_create(&mgmt_tid, NULL, scheduler_thread_entry, mgmt_thread);
+
+    pthread_t worker_tids[MAX_WORKERS];
+    for (int i = 0; i < worker_count; i++) {
+        pthread_create(&worker_tids[i], NULL, scheduler_thread_entry, &worker_threads[i]);
+    }
+
+    /* 5. 运行测试逻辑 */
+    node_run_test_trigger(node_name);
+
+    /* 6. 等待退出 */
     pthread_join(mgmt_tid, NULL);
     for (int i = 0; i < worker_count; i++) pthread_join(worker_tids[i], NULL);
+
     return 0;
 }
