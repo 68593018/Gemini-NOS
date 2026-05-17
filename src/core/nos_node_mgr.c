@@ -154,26 +154,28 @@ nos_status_t node_unload_component(const char *name) {
 nos_status_t node_reload_component(const char *name) {
     int idx = -1;
     for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
-        if (g_node_ctx.loaded_info[i].comp && strcmp(g_node_ctx.loaded_info[i].comp->name, name) == 0) {
+        if (strcmp(g_node_ctx.loaded_info[i].comp->name, name) == 0) {
             idx = (int)i; break;
         }
     }
     if (idx == -1) return NOS_ERR;
 
+    /* 关键修复：在 unload 之前必须深度拷贝元数据 */
     uint32_t id = g_node_ctx.loaded_info[idx].comp->id;
-    const char *lib_name = strdup(g_node_ctx.loaded_info[idx].lib_name);
+    char *lib_name = strdup(g_node_ctx.loaded_info[idx].lib_name);
+    char *comp_name = strdup(name);
     nos_thread_t *thread = g_node_ctx.loaded_info[idx].owner_thread;
 
     node_unload_component(name);
 
     void *new_handle = NULL;
-    nos_component_t *new_comp = node_load_component_internal(id, name, lib_name, &new_handle);
+    nos_component_t *new_comp = node_load_component_internal(id, comp_name, lib_name, &new_handle);
     if (new_comp) {
         if (g_node_ctx.loaded_count < MAX_COMPONENTS_PER_NODE) {
             loaded_comp_info_t *info = &g_node_ctx.loaded_info[g_node_ctx.loaded_count++];
             info->comp = new_comp; info->handle = new_handle; info->lib_name = lib_name; info->owner_thread = thread;
             nos_scheduler_register_component(thread, new_comp);
-            if (new_comp->start) { new_comp->start(new_comp); new_comp->status = NOS_COMP_ST_ACTIVE; }
+            /* 注意：此处不手动调用 start，让 run_loop 在下一次迭代自动触发 (确保在正确线程 context) */
             for (uint32_t i = 0; i < g_node_ctx.node_def->service_count; i++) {
                 if (g_node_ctx.node_def->services[i].provider_comp_id == id &&
                     strcmp(g_node_ctx.node_def->services[i].node_name, g_node_ctx.node_def->name) == 0) {
@@ -182,6 +184,12 @@ nos_status_t node_reload_component(const char *name) {
             }
         }
     }
-    free((void*)lib_name);
+    
+    /* 这里的 lib_name 所有权已经转移给 info 或加载失败需释放 */
+    int found = 0;
+    for(uint32_t i=0; i<g_node_ctx.loaded_count; i++) if(g_node_ctx.loaded_info[i].lib_name == lib_name) found=1;
+    if(!found) free(lib_name);
+    free(comp_name);
+    
     return (new_comp != NULL) ? NOS_OK : NOS_ERR;
 }
