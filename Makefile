@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Iinclude -Wall -fPIC -ffunction-sections -fdata-sections -g
+CFLAGS = -Iinclude -Wall -fPIC -ffunction-sections -fdata-sections
 LDFLAGS = -lpthread -ldl -rdynamic -Wl,--gc-sections
 PYTHON = python3
 GEN_SCRIPT = scripts/gen_manifest.py
