@@ -70,8 +70,12 @@ int main(int argc, char *argv[]) {
     nos_scheduler_stop(g_node_ctx.mgmt_thread);
     for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) nos_scheduler_stop(&g_node_ctx.worker_threads[i]);
 
+    /* 等待物理线程退出 */
     pthread_join(g_node_ctx.mgmt_tid, NULL);
     for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) pthread_join(g_node_ctx.worker_tids[i], NULL);
+    
+    /* 等待 CLI 线程退出 */
+    pthread_join(g_node_ctx.cli_tid, NULL);
 
     /* 8. 资源清理 */
     for (int i = (int)g_node_ctx.loaded_count - 1; i >= 0; i--) {
