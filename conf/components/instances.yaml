@@ -1,10 +1,15 @@
+platform:
+  provides:
+    - { name: "SVC_LOG", id: 1, type: "embedded" }
+
 components:
   - name: "Comp-1"
     model: "Model1"
     id: 1
     provides:
-      - { name: "SVC_MGMT", id: 101 }
+      - { name: "SVC_MGMT", id: 101, type: "remote" }
     requires:
+      - "SVC_LOG"
       - "SVC_ROUTING_V4"
       - "SVC_ROUTING_V6"
 
@@ -12,24 +17,30 @@ components:
     model: "Model2"
     id: 2
     provides:
-      - { name: "SVC_ROUTING_V4", id: 102 }
+      - { name: "SVC_ROUTING_V4", id: 102, type: "remote" }
     requires:
+      - "SVC_LOG"
       - "SVC_DATA_PROC"
 
   - name: "Comp-3"
     model: "Model3"
     id: 3
+    requires:
+      - "SVC_LOG"
 
   - name: "Comp-4"
     model: "Model4"
     id: 4
     provides:
-      - { name: "SVC_DATA_PROC", id: 204 }
+      - { name: "SVC_DATA_PROC", id: 204, type: "remote" }
+    requires:
+      - "SVC_LOG"
 
   - name: "Comp-5"
     model: "Model2"
     id: 5
     provides:
-      - { name: "SVC_ROUTING_V6", id: 105 }
+      - { name: "SVC_ROUTING_V6", id: 105, type: "remote" }
     requires:
+      - "SVC_LOG"
       - "SVC_DATA_PROC"

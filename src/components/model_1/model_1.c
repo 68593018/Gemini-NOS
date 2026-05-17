@@ -6,35 +6,35 @@
 #include "nos_service.h"
 #include "nos_buffer.h"
 #include "nos_ids.h"
+#include "nos_log.h"
 
 typedef struct {
+    nos_log_ops_t *log;
     int counter;
 } comp_ctx_t;
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
-    const char *payload = (const char *)((uint8_t *)msg + sizeof(nos_service_msg_t));
-    printf("[%s] RECEIVED: From Component %u, MsgCode %u, Payload: %s\n", 
-           self->name, msg->src_component, msg->msg_code, payload);
+    comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
+    
+    if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_INFO, self->name, "Received msg from Comp %u, Code %u", msg->src_component, msg->msg_code);
 
     if (msg->msg_code == 1001) {
-        printf("[%s] Auto-replying to MGMT Service...\n", self->name);
+        if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_INFO, self->name, "Replying to MGMT Service");
         nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 0);
         if (buf) {
             nos_service_msg_t *rsp = (nos_service_msg_t *)buf->data;
-            rsp->magic = NOS_IPC_MAGIC;
-            rsp->version = NOS_IPC_VERSION;
-            rsp->dst_service = SVC_MGMT; 
-            rsp->src_component = self->id;
-            rsp->msg_code = 1002;
-            rsp->payload_len = 32;
-            sprintf((char*)(buf->data + sizeof(nos_service_msg_t)), "Reply from %s", self->name);
+            rsp->magic = NOS_IPC_MAGIC; rsp->dst_service = SVC_MGMT; 
+            rsp->src_component = self->id; rsp->msg_code = 1002;
             nos_service_msg_send(buf);
         }
     }
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
-    self->priv = calloc(1, sizeof(comp_ctx_t));
+    comp_ctx_t *ctx = calloc(1, sizeof(comp_ctx_t));
+    ctx->log = nos_embedded_service_get("SVC_LOG");
+    self->priv = ctx;
+    if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_DEBUG, self->name, "Initialized with embedded log service");
     return NOS_OK;
 }
 

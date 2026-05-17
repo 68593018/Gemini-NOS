@@ -8,9 +8,11 @@ CONFIG_DIR = conf
 # 核心通用源码
 CORE_SRCS = src/core/nos_scheduler.c \
             src/core/nos_buffer.c \
+            src/core/nos_service.c \
             src/core/nos_node_mgr.c \
             src/core/nos_cli.c \
             src/infra/nos_ipc_p2p.c \
+            src/infra/nos_log.c \
             src/core/nos_node_main.c
 
 # 组件定义
@@ -33,7 +35,7 @@ nos_ProcB: $(CORE_SRCS) src/core/manifest_ProcB.c include/nos_ids.h
 	@echo "Building binary for node ProcB..."
 	@$(CC) $(CFLAGS) $(CORE_SRCS) src/core/manifest_ProcB.c -o $@ $(LDFLAGS)
 
-# 组件编译规则 (手动指定以确保 100% 正确)
+# 组件编译规则
 libcomp-1.so: src/components/model_1/model_1.c
 	@$(CC) $(CFLAGS) -shared $< -o $@
 libcomp-2.so: src/components/model_2/model_2.c

@@ -9,6 +9,7 @@
 #include "nos_node_mgr.h"
 #include "nos_cli.h"
 #include "nos_buffer.h"
+#include "nos_log.h"
 
 /* 定义并初始化全局上下文 */
 nos_node_ctx_t g_node_ctx = {
@@ -31,16 +32,18 @@ int main(int argc, char *argv[]) {
     const nos_node_def_t *node_def = nos_manifest_get_local();
     if (!node_def) { printf("Error: Local node manifest not found.\n"); return -1; }
 
-    const char *node_name = node_def->name;
     g_node_ctx.node_def = node_def;
 
-    printf("--- [NOS Node: %s] Starting ---\n", node_name);
+    /* 初始化日志服务 */
+    nos_log_init();
+
+    printf("--- [NOS Node: %s] Starting ---\n", node_def->name);
     nos_buffer_init_pool(node_def->buffer_pools);
 
     /* 1. 初始化管理面与数据面线程 */
     node_init_mgmt(node_def->uds_path);
     node_init_workers(node_def);
-    node_setup_routing(node_name);
+    node_setup_routing(node_def->name);
 
     /* 2. 触发启动生命周期 */
     for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
@@ -61,7 +64,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* 5. 启动 CLI 交互界面 */
-    node_cli_start(node_name);
+    node_cli_start(node_def->name);
 
     /* 6. 等待退出 */
     while (g_node_ctx.keep_running) sleep(1);
@@ -71,11 +74,8 @@ int main(int argc, char *argv[]) {
     nos_scheduler_stop(g_node_ctx.mgmt_thread);
     for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) nos_scheduler_stop(&g_node_ctx.worker_threads[i]);
 
-    /* 等待物理线程退出 */
     pthread_join(g_node_ctx.mgmt_tid, NULL);
     for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) pthread_join(g_node_ctx.worker_tids[i], NULL);
-    
-    /* 等待 CLI 线程退出 */
     pthread_join(g_node_ctx.cli_tid, NULL);
 
     /* 8. 资源清理 */

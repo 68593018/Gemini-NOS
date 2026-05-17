@@ -6,39 +6,32 @@
 #include "nos_service.h"
 #include "nos_buffer.h"
 #include "nos_ids.h"
+#include "nos_log.h"
 
-/* 组件私有上下文定义 */
 typedef struct {
+    nos_log_ops_t *log;
     int local_counter;
 } comp_ctx_t;
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
-    const char *payload = (const char *)((uint8_t *)msg + sizeof(nos_service_msg_t));
-    
     ctx->local_counter++;
-    printf("[%s] RECEIVED: From Component %u, MsgCode %u, Payload: %s (Local Counter: %d)\n", 
-           self->name, msg->src_component, msg->msg_code, payload, ctx->local_counter);
+    if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_INFO, self->name, "Msg received, counter: %d", ctx->local_counter);
 }
 
 static nos_status_t comp_init(nos_component_t *self) {
-    /* 每一个实例分配自己的私有内存 */
     comp_ctx_t *ctx = calloc(1, sizeof(comp_ctx_t));
+    ctx->log = nos_embedded_service_get("SVC_LOG");
     self->priv = ctx;
-    printf("[LibComp] Component '%s' initialized private context.\n", self->name);
+    if (ctx->log) ctx->log->log(NOS_LOG_LEVEL_DEBUG, self->name, "Context initialized");
     return NOS_OK;
 }
 
 static void comp_stop(nos_component_t *self) {
-    if (self->priv) {
-        free(self->priv);
-        self->priv = NULL;
-    }
+    if (self->priv) free(self->priv);
 }
 
-static nos_status_t comp_start(nos_component_t *self) {
-    return NOS_OK;
-}
+static nos_status_t comp_start(nos_component_t *self) { return NOS_OK; }
 
 nos_status_t nos_export_component(nos_component_t *comp) {
     if (!comp) return NOS_ERR;
@@ -46,6 +39,5 @@ nos_status_t nos_export_component(nos_component_t *comp) {
     comp->init = comp_init;
     comp->start = comp_start;
     comp->stop = comp_stop;
-    printf("[LibComp] Component '%s' (ID:%u) exported with Isolation Support.\n", comp->name, comp->id);
     return NOS_OK;
 }

@@ -9,6 +9,7 @@
 #define COMP_5               5
 
 /* Service IDs */
+#define SVC_LOG              1
 #define SVC_MGMT             101
 #define SVC_ROUTING_V4       102
 #define SVC_ROUTING_V6       105
