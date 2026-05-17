@@ -50,13 +50,14 @@ typedef struct nos_service_def_s {
     uint32_t service_id;    /**< 服务逻辑 ID */
     const char *node_name;  /**< 提供该服务的节点名称 */
     uint32_t provider_comp_id; /**< 提供该服务的组件 ID */
+    const char *remote_uds_path; /**< 远程 UDS 路径 (若是远程服务) */
     nos_service_status_t status; /**< 服务当前状态 (预留) */
 } nos_service_def_t;
 
 
 /**
- * @brief 获取节点定义
+ * @brief 获取本地节点定义 (编译时绑定)
  */
-const nos_node_def_t* nos_manifest_get_node(const char *node_name);
+const nos_node_def_t* nos_manifest_get_local(void);
 
 #endif /* __NOS_MANIFEST_H__ */

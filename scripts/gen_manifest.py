@@ -23,6 +23,7 @@ def parse_yaml_fallback(file_path):
         indent = len(line) - len(line.lstrip())
         content = line.strip()
         if content == "nodes:": mode = "nodes"; continue
+        if content == "services:": mode = "services"; continue
         if content == "components:": mode = "components"; continue
         if content == "profiles:": mode = "profiles"; continue
         if content == "models:": mode = "models"; continue
@@ -47,14 +48,14 @@ def parse_yaml_fallback(file_path):
             elif "model:" in content:
                 data["components"][-1]["model"] = content.split(":")[1].strip().strip('"')
             elif "provides:" in content:
-                pass # next lines will have items
-            elif content.startswith("- { name:") and indent > 4: # provides item
+                pass
+            elif content.startswith("- { name:") and indent > 4:
                 svc_name = re.search(r'name:\s*"([^"]+)"', content).group(1)
                 svc_id = int(re.search(r'id:\s*(\d+)', content).group(1))
                 data["components"][-1]["provides"].append({"name": svc_name, "id": svc_id})
             elif "requires:" in content:
-                pass # next lines will have items
-            elif content.startswith("- ") and indent > 4: # requires item
+                pass
+            elif content.startswith("- ") and indent > 4:
                 req_name = content.split("-")[1].strip().strip('"')
                 data["components"][-1]["requires"].append(req_name)
         elif mode == "models":
@@ -75,136 +76,103 @@ def parse_yaml_fallback(file_path):
     return data
 
 def validate_and_resolve(data):
-    # 1. Map component name to its info
     comp_map = {c["name"]: c for c in data["components"]}
-    # 2. Map model name to lib
     model_to_lib = {m["name"]: m["lib"] for m in data["models"]}
-    # 3. Global Service map: svc_name -> {id, provider_comp_id, node_name}
     global_svc_map = {}
     svc_name_to_id = {}
     comp_to_node = {}
+    node_to_uds = {n["name"]: n["uds_path"] for n in data["nodes"]}
 
-    # First pass: map components to nodes
     for node in data["nodes"]:
         for thread in node["threads"]:
             for comp_name in thread["components"]:
                 if comp_name in comp_map:
                     comp_to_node[comp_name] = node["name"]
 
-    # Second pass: map services to providers and nodes
     for comp in data["components"]:
         for svc in comp.get("provides", []):
             svc_name = svc["name"]
             global_svc_map[svc_name] = {
                 "id": svc["id"],
                 "provider_id": comp["id"],
-                "node": comp_to_node.get(comp["name"], "Unknown")
+                "node": comp_to_node.get(comp["name"], "Unknown"),
+                "uds_path": node_to_uds.get(comp_to_node.get(comp["name"], ""), "")
             }
             svc_name_to_id[svc_name] = svc["id"]
 
-    # 4. Resolve per-node requirements and startup levels (Simplified)
     profile_map = {p["name"]: p["bins"] for p in data["profiles"]}
     for node in data["nodes"]:
         pname = node.get("buffer_profile", "default")
         node["resolved_bins"] = profile_map.get(pname, profile_map.get("default", []))
-        
         node_comps = []
         for thread in node["threads"]:
-            resolved_ids = []
-            resolved_names = []
-            resolved_libs = []
+            resolved_ids, resolved_names, resolved_libs = [], [], []
             for comp_name in thread["components"]:
                 comp = comp_map.get(comp_name)
-                if not comp:
-                    print(f"Error: Unknown component '{comp_name}'"); sys.exit(1)
-                mname = comp["model"]
-                lib = model_to_lib.get(mname)
-                if not lib:
-                    print(f"Error: No lib for model '{mname}'"); sys.exit(1)
-                
+                if not comp: sys.exit(1)
+                lib = model_to_lib.get(comp["model"])
                 resolved_ids.append(comp["id"])
                 resolved_names.append(comp_name)
                 resolved_libs.append(lib)
                 node_comps.append(comp_name)
-                
             thread["comp_ids"] = resolved_ids
             thread["comp_names"] = resolved_names
             thread["comp_libs"] = resolved_libs
 
-        # Identify services needed by this node
         needed_svc_names = set()
         for comp_name in node_comps:
             comp = comp_map[comp_name]
             for s in comp.get("provides", []): needed_svc_names.add(s["name"])
             for s in comp.get("requires", []): needed_svc_names.add(s)
         
-        node_services = []
-        for sname in needed_svc_names:
-            svc_info = global_svc_map.get(sname)
-            if not svc_info:
-                print(f"Error: Service '{sname}' required but not provided."); sys.exit(1)
-            node_services.append(svc_info)
-        node["resolved_services"] = node_services
+        node["resolved_services"] = [global_svc_map[s] for s in needed_svc_names if s in global_svc_map]
 
     return {c["name"]: c["id"] for c in data["components"]}, svc_name_to_id
 
 def generate_header(comp_ids, svc_ids, header_path):
-    lines = ["#ifndef __NOS_IDS_H__", "#define __NOS_IDS_H__", ""]
-    lines.append("/* Component IDs */")
+    lines = ["#ifndef __NOS_IDS_H__", "#define __NOS_IDS_H__", "", "/* Component IDs */"]
     for name, cid in sorted(comp_ids.items(), key=lambda x: x[1]):
         lines.append(f"#define {to_c_macro(name):20} {cid}")
-    lines.append("")
-    lines.append("/* Service IDs */")
+    lines.append("\n/* Service IDs */")
     for name, sid in sorted(svc_ids.items(), key=lambda x: x[1]):
         lines.append(f"#define {to_c_macro(name):20} {sid}")
-    lines.append("")
-    lines.append("#endif")
+    lines.append("\n#endif")
     with open(header_path, 'w') as f: f.write("\n".join(lines))
 
-def generate_c_code(data, output_path):
+def generate_node_manifest(node, output_path):
     c_content = ['#include <string.h>', '#include "nos_manifest.h"', '']
     
-    for node in data["nodes"]:
-        safe_name = node["name"].lower()
-        # Per-node pools
-        c_content.append(f'static const nos_buffer_pool_def_t g_{safe_name}_pools[] = {{')
-        for b in node["resolved_bins"]:
-            c_content.append(f'    {{ .chunk_size = {b["size"]}, .chunk_count = {b["count"]} }},')
-        c_content.append('    { .chunk_size = 0 }\n};')
-        
-        # Per-node services
-        c_content.append(f'static const nos_service_def_t g_{safe_name}_services[] = {{')
-        for s in node["resolved_services"]:
-            c_content.append(f'    {{ .service_id = {s["id"]}, .node_name = "{s["node"]}", .provider_comp_id = {s["provider_id"]} }},')
-        c_content.append(f'    {{ .service_id = 0 }}\n}};')
+    c_content.append(f'static const nos_buffer_pool_def_t g_local_pools[] = {{')
+    for b in node["resolved_bins"]:
+        c_content.append(f'    {{ .chunk_size = {b["size"]}, .chunk_count = {b["count"]} }},')
+    c_content.append('    { .chunk_size = 0 }\n};')
+    
+    c_content.append(f'static const nos_service_def_t g_local_services[] = {{')
+    for s in node["resolved_services"]:
+        # 注意：这里增加了一个字段用于存放 UDS 路径，以便 node_mgr 能够直接注册远程路由
+        c_content.append(f'    {{ .service_id = {s["id"]}, .node_name = "{s["node"]}", .provider_comp_id = {s["provider_id"]}, .remote_uds_path = "{s["uds_path"]}" }},')
+    c_content.append(f'    {{ .service_id = 0 }}\n}};')
 
-    c_content.append('static const nos_node_def_t g_nodes[] = {')
-    for node in data["nodes"]:
-        safe_name = node["name"].lower()
-        c_content.append('    {')
-        c_content.append(f'        .name = "{node["name"]}", .uds_path = "{node["uds_path"]}",')
-        c_content.append(f'        .buffer_pools = g_{safe_name}_pools,')
-        c_content.append('        .threads = {')
-        for thread in node["threads"]:
-            ids_str = ", ".join(map(str, thread["comp_ids"]))
-            names_str = ", ".join(f'"{n}"' for n in thread["comp_names"])
-            libs_str = ", ".join(f'"{l}"' for l in thread["comp_libs"])
-            c_content.append(f'            {{ .name = "{thread["name"]}", .comp_ids = {{{ids_str}, 0}}, .comp_names = {{{names_str}, NULL}}, .comp_models = {{{libs_str}, NULL}} }},')
-        c_content.append('            { .name = NULL }')
-        c_content.append('        },')
-        c_content.append(f'        .services = g_{safe_name}_services, .service_count = {len(node["resolved_services"])}')
-        c_content.append('    },')
+    c_content.append('const nos_node_def_t g_local_node_def = {')
+    c_content.append(f'    .name = "{node["name"]}", .uds_path = "{node["uds_path"]}",')
+    c_content.append(f'    .buffer_pools = g_local_pools,')
+    c_content.append('    .threads = {')
+    for thread in node["threads"]:
+        ids_str = ", ".join(map(str, thread["comp_ids"]))
+        names_str = ", ".join(f'"{n}"' for n in thread["comp_names"])
+        libs_str = ", ".join(f'"{l}"' for l in thread["comp_libs"])
+        c_content.append(f'        {{ .name = "{thread["name"]}", .comp_ids = {{{ids_str}, 0}}, .comp_names = {{{names_str}, NULL}}, .comp_models = {{{libs_str}, NULL}} }},')
+    c_content.append('        { .name = NULL }')
+    c_content.append('    },')
+    c_content.append(f'    .services = g_local_services, .service_count = {len(node["resolved_services"])}')
     c_content.append('};')
     
-    c_content.append('const nos_node_def_t* nos_manifest_get_node(const char *n) {')
-    c_content.append('    for (size_t i=0; i<sizeof(g_nodes)/sizeof(g_nodes[0]); i++) if(strcmp(g_nodes[i].name, n)==0) return &g_nodes[i];')
-    c_content.append('    return NULL;\n}\n')
-    
+    c_content.append('\nconst nos_node_def_t* nos_manifest_get_local(void) { return &g_local_node_def; }')
     with open(output_path, 'w') as f: f.write("\n".join(c_content))
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4: sys.exit(1)
-    input_dir, out_c, out_h = sys.argv[1], sys.argv[2], sys.argv[3]
+    if len(sys.argv) < 3: sys.exit(1)
+    input_dir, out_h = sys.argv[1], sys.argv[2]
     master = {"nodes": [], "components": [], "profiles": [], "models": []}
     for r, ds, files in os.walk(input_dir):
         for f in files:
@@ -214,6 +182,12 @@ if __name__ == "__main__":
                 else: fd = parse_yaml_fallback(os.path.join(r,f))
                 if fd:
                     for k in master: master[k].extend(fd.get(k, []))
+    
     comp_ids, svc_ids = validate_and_resolve(master)
     generate_header(comp_ids, svc_ids, out_h)
-    generate_c_code(master, out_c)
+    
+    for node in master["nodes"]:
+        out_c = os.path.join(os.path.dirname(out_h), f"manifest_{node['name']}.c")
+        out_c = out_c.replace("include", "src/core")
+        generate_node_manifest(node, out_c)
+        print(node["name"], end=" ") # Output node names for Makefile to capture

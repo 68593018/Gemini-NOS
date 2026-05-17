@@ -28,12 +28,10 @@ static void* scheduler_thread_entry(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) { printf("Usage: %s <node_name>\n", argv[0]); return -1; }
+    const nos_node_def_t *node_def = nos_manifest_get_local();
+    if (!node_def) { printf("Error: Local node manifest not found.\n"); return -1; }
 
-    const char *node_name = argv[1];
-    const nos_node_def_t *node_def = nos_manifest_get_node(node_name);
-    if (!node_def) { printf("Error: Node '%s' not found.\n", node_name); return -1; }
-
+    const char *node_name = node_def->name;
     g_node_ctx.node_def = node_def;
 
     printf("--- [NOS Node: %s] Starting ---\n", node_name);

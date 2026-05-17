@@ -108,9 +108,12 @@ void node_setup_routing(const char *current_node_name) {
             }
             if (provider && owner_worker) nos_service_register_provider_bind(svc->service_id, provider, owner_worker);
         } else {
-            /* 远程服务注册 (仅注册该节点需要的远程服务) */
-            const nos_node_def_t *remote_node = nos_manifest_get_node(svc->node_name);
-            if (remote_node) nos_service_register_remote(svc->service_id, remote_node->uds_path);
+            /* 远程服务注册 (直接使用清单中预生成的路径) */
+            if (svc->remote_uds_path && strlen(svc->remote_uds_path) > 0) {
+                nos_service_register_remote(svc->service_id, svc->remote_uds_path);
+                printf("[Node] Routing: Remote Service %u -> %s (%s)\n", 
+                       svc->service_id, svc->node_name, svc->remote_uds_path);
+            }
         }
     }
 }
