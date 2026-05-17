@@ -37,17 +37,29 @@ static inline nos_log_ops_t* _nos_get_log_ops(void) {
  * 优势：组件代码不需要持有任何 handle 结构，直接调用。
  * 实现：通过 _nos_get_log_ops 原子门面自动桥接到平台提供的日志引擎。
  */
-#define nos_log_debug(self, fmt, ...) \
-    do { nos_log_ops_t *ops = _nos_get_log_ops(); if(ops) ops->log(NOS_LOG_LEVEL_DEBUG, (self)->id, fmt, ##__VA_ARGS__); } while(0)
+/**
+ * @brief 核心日志宏 (基于 ID)
+ */
+#define nos_log_raw(level, id, fmt, ...) \
+    do { nos_log_ops_t *ops = _nos_get_log_ops(); if(ops) ops->log(level, id, fmt, ##__VA_ARGS__); } while(0)
 
-#define nos_log_info(self, fmt, ...) \
-    do { nos_log_ops_t *ops = _nos_get_log_ops(); if(ops) ops->log(NOS_LOG_LEVEL_INFO, (self)->id, fmt, ##__VA_ARGS__); } while(0)
+/**
+ * @brief 系统级日志 API (ID 0)
+ * 适用于内核、调度器、内存管理等基础设施
+ */
+#define nos_sys_log_debug(fmt, ...) nos_log_raw(NOS_LOG_LEVEL_DEBUG, 0, fmt, ##__VA_ARGS__)
+#define nos_sys_log_info(fmt, ...)  nos_log_raw(NOS_LOG_LEVEL_INFO,  0, fmt, ##__VA_ARGS__)
+#define nos_sys_log_warn(fmt, ...)  nos_log_raw(NOS_LOG_LEVEL_WARN,  0, fmt, ##__VA_ARGS__)
+#define nos_sys_log_error(fmt, ...) nos_log_raw(NOS_LOG_LEVEL_ERROR, 0, fmt, ##__VA_ARGS__)
 
-#define nos_log_warn(self, fmt, ...) \
-    do { nos_log_ops_t *ops = _nos_get_log_ops(); if(ops) ops->log(NOS_LOG_LEVEL_WARN, (self)->id, fmt, ##__VA_ARGS__); } while(0)
-
-#define nos_log_error(self, fmt, ...) \
-    do { nos_log_ops_t *ops = _nos_get_log_ops(); if(ops) ops->log(NOS_LOG_LEVEL_ERROR, (self)->id, fmt, ##__VA_ARGS__); } while(0)
+/**
+ * @brief 组件便捷日志 API
+ * 自动从组件 self 上下文中提取 ID
+ */
+#define nos_log_debug(self, fmt, ...) nos_log_raw(NOS_LOG_LEVEL_DEBUG, (self)->id, fmt, ##__VA_ARGS__)
+#define nos_log_info(self, fmt, ...)  nos_log_raw(NOS_LOG_LEVEL_INFO,  (self)->id, fmt, ##__VA_ARGS__)
+#define nos_log_warn(self, fmt, ...)  nos_log_raw(NOS_LOG_LEVEL_WARN,  (self)->id, fmt, ##__VA_ARGS__)
+#define nos_log_error(self, fmt, ...) nos_log_raw(NOS_LOG_LEVEL_ERROR, (self)->id, fmt, ##__VA_ARGS__)
 
 /* 可以在此处继续扩展其他嵌入式服务的 Gate，如定时器、统计等 */
 

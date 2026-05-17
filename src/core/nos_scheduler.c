@@ -10,6 +10,7 @@
 #include "nos_scheduler.h"
 #include "nos_service.h"
 #include "nos_buffer.h"
+#include "nos_api.h"
 
 #define MAX_QUEUE_SIZE 1024
 #define MAX_EVENTS 10
@@ -307,7 +308,7 @@ void nos_scheduler_stop(nos_thread_t *thread) {
 }
 
 nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
-    printf("[Scheduler] Thread '%s' (TID: %lu) loop started.\n", self->name, pthread_self());
+    nos_sys_log_info("Thread '%s' (TID: %lu) loop started.", self->name, pthread_self());
     struct epoll_event events[MAX_EVENTS];
     int running = 1;
     
@@ -324,7 +325,7 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
                 if (read(self->notify_fd[0], &cmd, 1) > 0) {
                     if (cmd == 'q') {
                         running = 0;
-                        printf("[Scheduler] Thread '%s' exit command received.\n", self->name);
+                        nos_sys_log_info("Thread '%s' exit command received.", self->name);
                     } else if (cmd == 'm') {
                         process_thread_messages(self);
                     }
@@ -335,6 +336,6 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
             }
         }
     }
-    printf("[Scheduler] Thread '%s' loop terminated.\n", self->name);
+    nos_sys_log_info("Thread '%s' loop terminated.", self->name);
     return NOS_OK;
 }
