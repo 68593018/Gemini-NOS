@@ -107,6 +107,25 @@ static void process_timers(nos_thread_t *self) {
 
 /* --- 调度器核心实现 --- */
 
+static size_t get_thread_mem_usage(nos_thread_t *t) {
+    if (!t) return 0;
+    size_t total = sizeof(nos_thread_t);
+    total += MAX_COMP_PER_THREAD * sizeof(nos_component_t*);
+    total += 32 * sizeof(nos_fd_entry_t);
+    total += MAX_QUEUE_SIZE * sizeof(nos_buffer_t*);
+    total += t->timer_heap.capacity * sizeof(nos_timer_t*);
+    return total;
+}
+
+size_t nos_scheduler_get_total_mem_usage(void) {
+    extern nos_node_ctx_t g_node_ctx;
+    size_t total = get_thread_mem_usage(g_node_ctx.mgmt_thread);
+    for (uint32_t i = 0; i < g_node_ctx.worker_count; i++) {
+        total += get_thread_mem_usage(&g_node_ctx.worker_threads[i]);
+    }
+    return total;
+}
+
 nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const char *name) {
     if (!thread) return NOS_ERR;
     thread->thread_id = id;

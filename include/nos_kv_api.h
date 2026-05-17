@@ -56,6 +56,11 @@ void nos_kv_table_dump(nos_kv_table_t *table);
 void nos_kv_dump_all(void);
 
 /**
+ * @brief 获取 KV 引擎总内存占用 (Byte)
+ */
+size_t nos_kv_get_total_mem_usage(void);
+
+/**
  * @brief KV 服务操作接口 (API Table)
  */
 typedef struct {

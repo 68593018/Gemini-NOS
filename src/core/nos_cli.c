@@ -27,6 +27,7 @@ static void do_quit(const char *args);
 static void do_show_components(const char *args);
 static void do_show_services(const char *args);
 static void do_show_db(const char *args);
+static void do_show_memory(const char *args);
 static void do_load(const char *args);
 static void do_unload(const char *args);
 static void do_reload(const char *args);
@@ -42,6 +43,7 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {"show components", "List all loaded components",       do_show_components},
     {"show services",   "List all service routes",         do_show_services},
     {"show db",         "List all KV tables status",        do_show_db},
+    {"show memory",     "Show process memory consumption",  do_show_memory},
     {"load",            "Load a component by name",         do_load},
     {"unload",          "Unload a component by name",       do_unload},
     {"reload",          "Reload a component (Stateless check)", do_reload},
@@ -89,6 +91,46 @@ static void do_show_services(const char *args) {
 }
 
 static void do_show_db(const char *args) { extern void nos_kv_dump_all(void); nos_kv_dump_all(); }
+
+static void do_show_memory(const char *args) {
+    extern size_t nos_log_get_mem_usage(void);
+    extern size_t nos_kv_get_total_mem_usage(void);
+    extern size_t nos_buffer_get_total_mem_usage(void);
+    extern size_t nos_scheduler_get_total_mem_usage(void);
+
+    size_t log_mem = nos_log_get_mem_usage();
+    size_t kv_mem  = nos_kv_get_total_mem_usage();
+    size_t buf_mem = nos_buffer_get_total_mem_usage();
+    size_t sch_mem = nos_scheduler_get_total_mem_usage();
+
+    printf("\n--- NOS Process Memory Consumption ---\n");
+    printf("%-20s %-15s %-15s\n", "Module/Component", "Usage (Bytes)", "Type");
+    printf("------------------------------------------------------------\n");
+
+    /* 1. 嵌入式服务与基础设施 */
+    printf("%-20s %-15zu %-15s\n", "SVC_LOG", log_mem, "Embedded Service");
+    printf("%-20s %-15zu %-15s\n", "SVC_KV_DB", kv_mem, "Embedded Service");
+    printf("%-20s %-15zu %-15s\n", "Buffer Pool", buf_mem, "Infrastructure");
+    printf("%-20s %-15zu %-15s\n", "Scheduler/Threads", sch_mem, "Infrastructure");
+
+    /* 2. 组件维度 */
+    size_t total_comp_mem = 0;
+    for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
+        loaded_comp_info_t *info = &g_node_ctx.loaded_info[i];
+        size_t comp_obj_mem = sizeof(nos_component_t);
+        /* 简单起见，目前仅统计已知结构的 priv 大小 */
+        size_t priv_mem = 0;
+        if (strstr(info->lib_name, "libcomp-1.so")) priv_mem = 16;
+        else if (strstr(info->lib_name, "libcomp-2.so")) priv_mem = 32;
+
+        printf("%-20s %-15zu %-15s\n", info->comp->name, comp_obj_mem + priv_mem, "Component");
+        total_comp_mem += (comp_obj_mem + priv_mem);
+    }
+
+    printf("------------------------------------------------------------\n");
+    printf("%-20s %-15zu\n\n", "Total Accounted", log_mem + kv_mem + buf_mem + sch_mem + total_comp_mem);
+}
+
 static void do_load(const char *args) { if (args) node_reload_component(args); }
 static void do_reload(const char *args) { if (args) node_reload_component(args); }
 static void do_unload(const char *args) { if (args) node_unload_component(args); }

@@ -73,4 +73,9 @@ void* nos_buffer_pull(nos_buffer_t *buf, uint32_t size);
  */
 void nos_buffer_dump_stats(void);
 
+/**
+ * @brief 获取 Buffer 池总内存占用 (Byte)
+ */
+size_t nos_buffer_get_total_mem_usage(void);
+
 #endif /* __NOS_BUFFER_H__ */

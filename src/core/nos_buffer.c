@@ -144,6 +144,19 @@ void* nos_buffer_pull(nos_buffer_t *buf, uint32_t size) {
     return buf->data;
 }
 
+size_t nos_buffer_get_total_mem_usage(void) {
+    size_t total = 0;
+    pthread_mutex_lock(&g_buffer_lock);
+    for (uint32_t i = 0; i < g_bin_count; i++) {
+        nos_buffer_bin_t *bin = &g_bins[i];
+        total += sizeof(nos_buffer_bin_t);
+        total += bin->chunk_count * (bin->chunk_size + sizeof(nos_buffer_t));
+        total += bin->chunk_count * sizeof(uint32_t); // free_stack
+    }
+    pthread_mutex_unlock(&g_buffer_lock);
+    return total;
+}
+
 void nos_buffer_dump_stats(void) {
     nos_sys_log_info("--- NOS Buffer Pool Statistics ---");
     nos_sys_log_info("%-5s %-12s %-8s %-8s %-8s", "Bin", "ChunkSize", "Total", "Used", "Peak");

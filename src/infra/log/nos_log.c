@@ -161,3 +161,7 @@ void nos_log_init(void) {
     
     ctx->initialized = 1;
 }
+
+size_t nos_log_get_mem_usage(void) {
+    return sizeof(nos_log_context_t);
+}

@@ -228,6 +228,19 @@ nos_status_t nos_kv_del(nos_kv_table_t *table, const void *key) {
     return NOS_ERR;
 }
 
+size_t nos_kv_get_total_mem_usage(void) {
+    size_t total = 0;
+    pthread_mutex_lock(&g_table_mgr_lock);
+    for (int i = 0; i < g_table_count; i++) {
+        nos_kv_table_t *t = g_tables[i];
+        total += sizeof(nos_kv_table_t);
+        total += t->bucket_count * sizeof(nos_kv_bucket_t);
+        total += t->capacity * (t->entry_size + sizeof(uint32_t)); // Data pool + free stack
+    }
+    pthread_mutex_unlock(&g_table_mgr_lock);
+    return total;
+}
+
 void nos_kv_dump_all(void) {
     pthread_mutex_lock(&g_table_mgr_lock);
     if (g_table_count == 0) {
