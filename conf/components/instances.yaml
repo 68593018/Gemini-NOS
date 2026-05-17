@@ -29,8 +29,11 @@ components:
   - name: "Comp-3"
     model: "Model3"
     id: 3
+    provides:
+      - { name: "SVC_PERF_RX", id: 110, type: "remote" }
     requires:
       - "SVC_LOG"
+      - "SVC_ROUTING_V6"
 
   - name: "Comp-4"
     model: "Model4"

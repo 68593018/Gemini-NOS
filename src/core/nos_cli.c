@@ -7,6 +7,9 @@
 #include "nos_node_priv.h"
 #include "nos_node_mgr.h"
 #include "nos_manifest.h"
+#include "nos_service.h"
+#include "nos_buffer.h"
+#include "nos_api.h"
 
 /* --- CLI 历史记录管理 --- */
 #define MAX_HISTORY 3
@@ -28,6 +31,7 @@ static void do_show_components(const char *args);
 static void do_show_services(const char *args);
 static void do_show_db(const char *args);
 static void do_show_memory(const char *args);
+static void do_perf_start(const char *args);
 static void do_load(const char *args);
 static void do_unload(const char *args);
 static void do_reload(const char *args);
@@ -44,6 +48,7 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {"show services",   "List all service routes",         do_show_services},
     {"show db",         "List all KV tables status",        do_show_db},
     {"show memory",     "Show process memory consumption",  do_show_memory},
+    {"perf start",      "Start IPC performance test",       do_perf_start},
     {"load",            "Load a component by name",         do_load},
     {"unload",          "Unload a component by name",       do_unload},
     {"reload",          "Reload a component (Stateless check)", do_reload},
@@ -118,19 +123,32 @@ static void do_show_memory(const char *args) {
     for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
         loaded_comp_info_t *info = &g_node_ctx.loaded_info[i];
         size_t comp_obj_mem = sizeof(nos_component_t);
-        /* 简单起见，目前仅统计已知结构的 priv 大小 */
         size_t priv_mem = 0;
         if (strstr(info->lib_name, "libcomp-1.so")) priv_mem = 16;
         else if (strstr(info->lib_name, "libcomp-2.so")) priv_mem = 32;
-
         printf("%-20s %-15zu %-15s\n", info->comp->name, comp_obj_mem + priv_mem, "Component");
         total_comp_mem += (comp_obj_mem + priv_mem);
     }
-
     printf("------------------------------------------------------------\n");
     printf("%-20s %-15zu\n\n", "Total Accounted", log_mem + kv_mem + buf_mem + sch_mem + total_comp_mem);
 }
 
+static void do_perf_start(const char *args) {
+    uint32_t count = args ? (uint32_t)atoi(args) : 10000;
+    if (count == 0) count = 10000;
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + sizeof(uint32_t), 0);
+    if (buf) {
+        nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+        msg->magic = NOS_IPC_MAGIC;
+        msg->dst_service = 110; // SVC_PERF_RX (Comp-3)
+        msg->msg_code = 3001; // START_TEST
+        msg->payload_len = sizeof(uint32_t);
+        memcpy(msg + 1, &count, sizeof(uint32_t));
+        printf("[CLI] Triggering performance test with %u iterations...\n", count);
+        nos_service_msg_send(buf);
+        nos_buffer_release(buf);
+    }
+}
 static void do_load(const char *args) { if (args) node_reload_component(args); }
 static void do_reload(const char *args) { if (args) node_reload_component(args); }
 static void do_unload(const char *args) { if (args) node_unload_component(args); }
@@ -150,7 +168,7 @@ static int advanced_get_line(char *buf, int size, const char *prompt) {
             if (seq[0] == '[' && seq[1] == 'A') {
                 if (g_history_count > 0 && h_idx < g_history_count - 1) {
                     h_idx++; printf("\r%s\033[K%s", prompt, g_history[h_idx]);
-                    strcpy(buf, g_history[h_idx]); pos = strlen(buf);
+                    strcpy(buf, g_history[h_idx]); pos = (int)strlen(buf);
                 }
             }
         } else if (c == 127 || c == 8) {
@@ -158,7 +176,7 @@ static int advanced_get_line(char *buf, int size, const char *prompt) {
         } else if (c == '\t') {
             buf[pos] = '\0'; int matches = 0, last = -1;
             for (int i = 0; g_cli_cmds[i].name; i++) if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) { matches++; last = i; }
-            if (matches == 1) { printf("%s", g_cli_cmds[last].name + pos); strcpy(buf + pos, g_cli_cmds[last].name + pos); pos = strlen(buf); }
+            if (matches == 1) { printf("%s", g_cli_cmds[last].name + pos); strcpy(buf + pos, g_cli_cmds[last].name + pos); pos = (int)strlen(buf); }
             else if (matches > 1) {
                 printf("\n"); for (int i = 0; g_cli_cmds[i].name; i++) if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) printf("%s  ", g_cli_cmds[i].name);
                 printf("\n%s%s", prompt, buf);
@@ -180,7 +198,7 @@ static void* node_cli_thread_entry(void *arg) {
         history_add(buf);
         int found = 0;
         for (int i = 0; g_cli_cmds[i].name; i++) {
-            int nlen = strlen(g_cli_cmds[i].name);
+            int nlen = (int)strlen(g_cli_cmds[i].name);
             if (strcmp(buf, g_cli_cmds[i].name) == 0 || (strncmp(buf, g_cli_cmds[i].name, nlen) == 0 && buf[nlen] == ' ')) {
                 g_cli_cmds[i].handler((buf[nlen] == ' ') ? (buf + nlen + 1) : NULL);
                 found = 1; break;

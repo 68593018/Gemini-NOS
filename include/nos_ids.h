@@ -15,6 +15,7 @@
 #define SVC_MGMT             101
 #define SVC_ROUTING_V4       102
 #define SVC_ROUTING_V6       105
+#define SVC_PERF_RX          110
 #define SVC_DATA_PROC        204
 
 #endif
