@@ -98,9 +98,37 @@ nos_status_t nos_service_register_remote(uint32_t service_id, const char *uds_pa
 }
 
 nos_status_t nos_scheduler_register_component(nos_thread_t *thread, nos_component_t *comp) {
-    if (!thread) return NOS_ERR;
+    if (!thread || !comp) return NOS_ERR;
+    if (thread->component_count >= 32) return NOS_ERR;
     thread->components[thread->component_count++] = comp;
     return NOS_OK;
+}
+
+nos_status_t nos_scheduler_unregister_component(nos_thread_t *thread, nos_component_t *comp) {
+    if (!thread || !comp) return NOS_ERR;
+    for (uint32_t i = 0; i < thread->component_count; i++) {
+        if (thread->components[i] == comp) {
+            if (i != thread->component_count - 1) {
+                thread->components[i] = thread->components[thread->component_count - 1];
+            }
+            thread->component_count--;
+            return NOS_OK;
+        }
+    }
+    return NOS_ERR;
+}
+
+nos_status_t nos_service_unregister_provider(uint32_t service_id) {
+    for (uint32_t i = 0; i < g_service_count; i++) {
+        if (g_service_registry[i].service_id == service_id) {
+            if (i != g_service_count - 1) {
+                g_service_registry[i] = g_service_registry[g_service_count - 1];
+            }
+            g_service_count--;
+            return NOS_OK;
+        }
+    }
+    return NOS_ERR;
 }
 
 nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg) {
@@ -250,9 +278,6 @@ nos_status_t nos_service_msg_send(nos_buffer_t *buf) {
 }
 
 static void process_thread_messages(nos_thread_t *self) {
-    char pipe_buf[16];
-    while (read(self->notify_fd[0], pipe_buf, sizeof(pipe_buf)) > 0); 
-
     while (1) {
         nos_buffer_t *buf = NULL;
         pthread_mutex_lock(&self->queue_lock);
@@ -275,20 +300,41 @@ static void process_thread_messages(nos_thread_t *self) {
     }
 }
 
+void nos_scheduler_stop(nos_thread_t *thread) {
+    if (!thread) return;
+    char notify_cmd = 'q'; // 'q' for quit
+    write(thread->notify_fd[1], &notify_cmd, 1);
+}
+
 nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
     printf("[Scheduler] Thread '%s' (TID: %lu) loop started.\n", self->name, pthread_self());
     struct epoll_event events[MAX_EVENTS];
-    while (1) {
+    int running = 1;
+    
+    while (running) {
         int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, -1); 
-        if (nfds < 0) break;
+        if (nfds < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
         for (int i = 0; i < nfds; i++) {
             if (events[i].data.fd == self->notify_fd[0]) {
-                process_thread_messages(self);
+                /* 检查指令类型 */
+                char cmd;
+                if (read(self->notify_fd[0], &cmd, 1) > 0) {
+                    if (cmd == 'q') {
+                        running = 0;
+                        printf("[Scheduler] Thread '%s' exit command received.\n", self->name);
+                    } else if (cmd == 'm') {
+                        process_thread_messages(self);
+                    }
+                }
             } else {
                 nos_fd_entry_t *entry = (nos_fd_entry_t *)events[i].data.ptr;
                 if (entry && entry->callback) entry->callback(entry->fd, entry->arg);
             }
         }
     }
+    printf("[Scheduler] Thread '%s' loop terminated.\n", self->name);
     return NOS_OK;
 }

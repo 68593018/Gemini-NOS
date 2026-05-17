@@ -64,9 +64,25 @@ nos_status_t nos_service_register_provider(uint32_t service_id, nos_component_t 
 nos_status_t nos_scheduler_register_component(nos_thread_t *thread, nos_component_t *comp);
 
 /**
- * @brief 启动调度循环
+ * @brief 从调度器注销组件
+ */
+nos_status_t nos_scheduler_unregister_component(nos_thread_t *thread, nos_component_t *comp);
+
+/**
+ * @brief 注销服务提供者
+ */
+nos_status_t nos_service_unregister_provider(uint32_t service_id);
+
+/**
+ * @brief 向调度器注册外部 FD
+
  */
 nos_status_t nos_scheduler_run_loop(nos_thread_t *self);
+
+/**
+ * @brief 通知调度器线程停止运行
+ */
+void nos_scheduler_stop(nos_thread_t *thread);
 
 /**
  * @brief 初始化线程调度器对象
