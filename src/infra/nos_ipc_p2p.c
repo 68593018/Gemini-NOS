@@ -38,7 +38,7 @@ static void nos_ipc_data_handler(int client_fd, void *arg) {
     }
 
     /* 3. 申请 Buffer 池内存并读取 Payload */
-    nos_buffer_t *buf = nos_buffer_alloc();
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(header) + header.payload_len, 0);
     if (!buf) {
         printf("[IPC] Buffer Pool empty! Dropping message.\n");
         goto err_close;

@@ -104,7 +104,7 @@ static void node_run_test_trigger(const char *node_name) {
     if (strcmp(node_name, "ProcA") == 0) {
         sleep(2);
         printf("[Node] %s triggering initial service test...\n", node_name);
-        nos_buffer_t *buf = nos_buffer_alloc();
+        nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 16);
         if (buf) {
             nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
             msg->magic = NOS_IPC_MAGIC;
@@ -134,7 +134,8 @@ int main(int argc, char *argv[]) {
     }
 
     printf("--- [NOS Node: %s] Starting ---\n", node_name);
-    nos_buffer_init_pool();
+    nos_buffer_init_pool(node_def->buffer_pools);
+    nos_buffer_dump_stats();
 
     /* 1. 初始化管理线程 */
     nos_thread_t *mgmt_thread = node_init_mgmt(node_def->uds_path);

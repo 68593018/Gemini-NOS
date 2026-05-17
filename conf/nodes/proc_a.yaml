@@ -1,6 +1,7 @@
 nodes:
   - name: "ProcA"
     uds_path: "/tmp/nos_proc_A.sock"
+    buffer_profile: "lite_mgmt"
     threads:
       - name: "Worker-1"
         components: ["Comp-1"]

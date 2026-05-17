@@ -1,6 +1,7 @@
 nodes:
   - name: "ProcB"
     uds_path: "/tmp/nos_proc_B.sock"
+    buffer_profile: "high_performance_data"
     threads:
       - name: "Worker-1"
         components: ["Comp-4"]

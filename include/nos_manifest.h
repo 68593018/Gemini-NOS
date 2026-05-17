@@ -12,11 +12,20 @@ typedef struct {
 } nos_thread_def_t;
 
 /**
+ * @brief 缓冲区池规格定义
+ */
+typedef struct {
+    uint32_t chunk_size;    /**< 块大小 */
+    uint32_t chunk_count;   /**< 块数量 */
+} nos_buffer_pool_def_t;
+
+/**
  * @brief 节点（进程）定义
  */
 typedef struct {
     const char *name;       /**< 进程名 */
     const char *uds_path;   /**< 进程监听的 UDS 路径 */
+    const nos_buffer_pool_def_t *buffer_pools; /**< 指向缓冲区池配置列表 (chunk_size 为 0 结束) */
     nos_thread_def_t threads[8]; /**< 进程内的线程列表 (空名字结束) */
 } nos_node_def_t;
 
