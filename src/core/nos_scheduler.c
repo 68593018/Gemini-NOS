@@ -267,12 +267,19 @@ nos_status_t nos_service_unregister_provider(uint32_t service_id) {
     return NOS_ERR;
 }
 
-nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg) {
+nos_status_t nos_scheduler_add_fd_ex(nos_thread_t *thread, int fd, uint32_t events, nos_fd_callback_t callback, void *arg) {
     if (!thread || thread->fd_count >= 32) return NOS_ERR;
     nos_fd_entry_t *entry = &thread->fd_entries[thread->fd_count++];
     entry->fd = fd; entry->callback = callback; entry->arg = arg;
-    struct epoll_event ev = {.events = EPOLLIN, .data.ptr = entry};
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.events = events;
+    ev.data.ptr = entry;
     return (epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) ? NOS_ERR : NOS_OK;
+}
+
+nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg) {
+    return nos_scheduler_add_fd_ex(thread, fd, EPOLLIN, callback, arg);
 }
 
 nos_status_t nos_scheduler_remove_fd(nos_thread_t *thread, int fd) {
@@ -306,48 +313,9 @@ static nos_status_t nos_transport_local_send(nos_buffer_t *buf, nos_thread_t *ta
     return NOS_OK;
 }
 
-typedef struct { char uds_path[108]; int fd; } nos_uds_conn_t;
-static nos_uds_conn_t g_uds_conn_pool[16];
-static uint32_t g_uds_conn_count = 0;
-static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static int get_or_create_uds_conn(const char *uds_path) {
-    pthread_mutex_lock(&g_pool_lock);
-    for (uint32_t i = 0; i < g_uds_conn_count; i++) {
-        if (strcmp(g_uds_conn_pool[i].uds_path, uds_path) == 0) {
-            int fd = g_uds_conn_pool[i].fd; pthread_mutex_unlock(&g_pool_lock); return fd;
-        }
-    }
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd >= 0) {
-        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
-        struct sockaddr_un addr = {.sun_family = AF_UNIX};
-        strncpy(addr.sun_path, uds_path, sizeof(addr.sun_path) - 1);
-        if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 && errno != EINPROGRESS) { close(fd); fd = -1; }
-        if (fd >= 0 && g_uds_conn_count < 16) {
-            strncpy(g_uds_conn_pool[g_uds_conn_count].uds_path, uds_path, 107);
-            g_uds_conn_pool[g_uds_conn_count++].fd = fd;
-        }
-    }
-    pthread_mutex_unlock(&g_pool_lock); return fd;
-}
-
 static nos_status_t nos_transport_remote_uds_send(nos_buffer_t *buf, const char *uds_path) {
-    nos_service_msg_t *header = (nos_service_msg_t *)buf->data;
-    size_t full_len = sizeof(nos_service_msg_t) + header->payload_len;
-    int fd = get_or_create_uds_conn(uds_path);
-    if (fd < 0) return NOS_ERR;
-    ssize_t sent = send(fd, buf->data, full_len, MSG_NOSIGNAL);
-    if (sent == (ssize_t)full_len) return NOS_OK;
-    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return NOS_ERR_BUSY;
-    pthread_mutex_lock(&g_pool_lock);
-    for (uint32_t i = 0; i < g_uds_conn_count; i++) {
-        if (strcmp(g_uds_conn_pool[i].uds_path, uds_path) == 0) {
-            close(g_uds_conn_pool[i].fd);
-            g_uds_conn_pool[i] = g_uds_conn_pool[--g_uds_conn_count]; break;
-        }
-    }
-    pthread_mutex_unlock(&g_pool_lock); return NOS_ERR;
+    extern nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf);
+    return nos_ipc_send_enqueue(uds_path, buf);
 }
 
 nos_status_t nos_service_msg_send(nos_buffer_t *buf) {
