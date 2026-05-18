@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/eventfd.h>
+#include <stdatomic.h>
 #include <errno.h>
 #include <time.h>
 #include "nos_scheduler.h"
@@ -138,6 +139,7 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     thread->msg_queue = calloc(MAX_QUEUE_SIZE, sizeof(nos_buffer_t*));
     thread->head = thread->tail = 0;
     thread->stop_requested = 0;
+    atomic_init(&thread->is_sleeping, 0);
     pthread_mutex_init(&thread->queue_lock, NULL);
     thread->epoll_fd = epoll_create1(0);
 
@@ -296,8 +298,11 @@ static nos_status_t nos_transport_local_send(nos_buffer_t *buf, nos_thread_t *ta
     target_thread->tail = next_tail;
     pthread_mutex_unlock(&target_thread->queue_lock);
     
-    uint64_t val = 1;
-    if (write(target_thread->notify_fd, &val, sizeof(val)) < 0) { /* Ignore */ }
+    /* Zero-syscall optimization: Only write to eventfd if target thread is sleeping */
+    if (atomic_load_explicit(&target_thread->is_sleeping, memory_order_acquire)) {
+        uint64_t val = 1;
+        if (write(target_thread->notify_fd, &val, sizeof(val)) < 0) { /* Ignore */ }
+    }
     return NOS_OK;
 }
 
@@ -397,12 +402,53 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
     struct epoll_event events[MAX_EVENTS];
     
     while (!self->stop_requested) {
+        /* Busy spin to process messages without kernel intervention if possible */
+        int spun = 0;
+        for (int spin = 0; spin < 5000; spin++) {
+            if (self->head != self->tail) {
+                spun = 1;
+                break;
+            }
+            __asm__ volatile("pause" ::: "memory");
+        }
+
+        if (spun || self->head != self->tail) {
+            process_thread_messages(self);
+            process_timers(self);
+            
+            /* Fast path: poll epoll immediately without sleeping to handle eventfd and other FDs */
+            int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, 0);
+            for (int i = 0; i < nfds; i++) {
+                nos_fd_entry_t *entry = (nos_fd_entry_t *)events[i].data.ptr;
+                if (!entry) continue;
+                if (entry->fd == self->notify_fd) {
+                    uint64_t val; if (read(self->notify_fd, &val, sizeof(val)) < 0) {}
+                } else {
+                    if (entry->callback) entry->callback(entry->fd, entry->arg);
+                }
+            }
+            continue;
+        }
+
+        /* Go to sleep */
+        atomic_store_explicit(&self->is_sleeping, 1, memory_order_release);
+        atomic_thread_fence(memory_order_seq_cst);
+        
+        /* Double check to prevent race condition (lost wakeup) */
+        if (self->head != self->tail || self->stop_requested) {
+            atomic_store_explicit(&self->is_sleeping, 0, memory_order_release);
+            continue;
+        }
+
         int timeout = -1;
         if (self->timer_heap.size > 0) {
             uint64_t now = get_monotonic_ms();
             timeout = (self->timer_heap.nodes[0]->expire_at_ms <= now) ? 0 : (int)(self->timer_heap.nodes[0]->expire_at_ms - now);
         }
+
         int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, timeout);
+        atomic_store_explicit(&self->is_sleeping, 0, memory_order_release);
+        
         process_timers(self);
         
         for (int i = 0; i < nfds; i++) {

@@ -2,6 +2,7 @@
 #define __NOS_SCHEDULER_H__
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include "nos_component.h"
 #include "nos_buffer.h"
 #include "nos_timer_api.h"
@@ -36,6 +37,7 @@ typedef struct nos_thread_s {
     int epoll_fd;               /**< epoll 句柄 */
     int notify_fd;              /**< 唤醒句柄 (eventfd) */
     volatile int stop_requested; /**< 停止请求标志 */
+    _Atomic int is_sleeping;     /**< 线程是否睡眠 */
     nos_fd_entry_t notify_entry; /**< 专门用于唤醒句柄的 entry */
     
     pthread_mutex_t queue_lock; /**< 队列锁 */
