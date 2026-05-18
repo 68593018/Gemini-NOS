@@ -17,23 +17,7 @@ static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     comp_ctx_t *ctx = (comp_ctx_t *)self->priv;
     if (!ctx) return;
     
-    /* 1. 性能测试响应逻辑 (优先级最高) */
-    if (msg->msg_code == 2001) { // PING
-        nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t), 0);
-        if (buf) {
-            nos_service_msg_t *pong = (nos_service_msg_t *)buf->data;
-            pong->magic = NOS_IPC_MAGIC;
-            pong->dst_service = 110; // SVC_PERF_RX (Comp-3)
-            pong->src_component = self->id;
-            pong->msg_code = 2002; // PONG
-            pong->payload_len = 0;
-            nos_service_msg_send(buf);
-            nos_buffer_release(buf);
-        }
-        return;
-    }
-
-    /* 2. 原有业务逻辑 */
+    /* 原有业务逻辑 */
     ctx->local_counter++;
     
     /* 1. 同步组件运行状态 (Key 是字符串名称，需填充对齐) */
