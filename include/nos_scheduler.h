@@ -38,7 +38,7 @@ typedef struct nos_thread_s {
     volatile int stop_requested; /**< 停止请求标志 */
     nos_fd_entry_t notify_entry; /**< 专门用于唤醒句柄的 entry */
     
-    pthread_spinlock_t queue_lock; /**< 队列锁 (自旋锁) */
+    pthread_mutex_t queue_lock; /**< 队列锁 */
     nos_buffer_t **msg_queue;
     int head, tail;
 

@@ -138,16 +138,15 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     thread->msg_queue = calloc(MAX_QUEUE_SIZE, sizeof(nos_buffer_t*));
     thread->head = thread->tail = 0;
     thread->stop_requested = 0;
-    pthread_spin_init(&thread->queue_lock, PTHREAD_PROCESS_PRIVATE);
+    pthread_mutex_init(&thread->queue_lock, NULL);
     thread->epoll_fd = epoll_create1(0);
-    
-    /* 使用 eventfd 替代 pipe，性能更好且只需一个 FD */
+
     thread->notify_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (thread->notify_fd < 0) return NOS_ERR;
 
     /* 为 notify_fd 建立专门的 entry */
     thread->notify_entry.fd = thread->notify_fd;
-    thread->notify_entry.callback = NULL; /* 特殊标识 */
+    thread->notify_entry.callback = NULL;
     thread->notify_entry.arg = thread;
 
     struct epoll_event ev;
@@ -155,6 +154,7 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     ev.events = EPOLLIN;
     ev.data.ptr = &thread->notify_entry;
     epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, thread->notify_fd, &ev);
+
     thread->timer_heap.capacity = 128;
     thread->timer_heap.size = 0;
     thread->timer_heap.nodes = calloc(thread->timer_heap.capacity, sizeof(nos_timer_t*));
@@ -169,13 +169,14 @@ void nos_scheduler_deinit_thread(nos_thread_t *thread) {
     close(thread->notify_fd);
 
     /* 2. 释放内部队列的消息 (如果有) */
-    pthread_spin_lock(&thread->queue_lock);
+    pthread_mutex_lock(&thread->queue_lock);
     while (thread->head != thread->tail) {
         nos_buffer_release(thread->msg_queue[thread->head]);
         thread->head = (thread->head + 1) % MAX_QUEUE_SIZE;
     }
-    pthread_spin_unlock(&thread->queue_lock);
-    pthread_spin_destroy(&thread->queue_lock);
+    pthread_mutex_unlock(&thread->queue_lock);
+    pthread_mutex_destroy(&thread->queue_lock);
+
 
     /* 3. 释放定时器堆中的定时器 (由框架创建的容器，内部 timer 需由组件释放或在此兜底) */
     /* 注意：工业级实现中，定时器通常由组件管理，此处仅释放容器数组 */
@@ -286,24 +287,17 @@ nos_status_t nos_scheduler_remove_fd(nos_thread_t *thread, int fd) {
 
 static nos_status_t nos_transport_local_send(nos_buffer_t *buf, nos_thread_t *target_thread) {
     if (!target_thread) return NOS_ERR;
-    pthread_spin_lock(&target_thread->queue_lock);
-    
-    /* 条件通知优化：仅当队列从空变为非空时才触发系统调用唤醒 */
-    int was_empty = (target_thread->head == target_thread->tail);
+    pthread_mutex_lock(&target_thread->queue_lock);
     
     int next_tail = (target_thread->tail + 1) % MAX_QUEUE_SIZE;
-    if (next_tail == target_thread->head) { pthread_spin_unlock(&target_thread->queue_lock); return NOS_ERR_BUSY; }
+    if (next_tail == target_thread->head) { pthread_mutex_unlock(&target_thread->queue_lock); return NOS_ERR_BUSY; }
     nos_buffer_retain(buf);
     target_thread->msg_queue[target_thread->tail] = buf;
     target_thread->tail = next_tail;
-    pthread_spin_unlock(&target_thread->queue_lock);
+    pthread_mutex_unlock(&target_thread->queue_lock);
     
-    if (was_empty) {
-        uint64_t val = 1;
-        if (write(target_thread->notify_fd, &val, sizeof(val)) < 0) {
-            /* 忽略 EAGAIN */
-        }
-    }
+    uint64_t val = 1;
+    if (write(target_thread->notify_fd, &val, sizeof(val)) < 0) { /* Ignore */ }
     return NOS_OK;
 }
 
@@ -363,29 +357,22 @@ nos_status_t nos_service_msg_send(nos_buffer_t *buf) {
 
 static void process_thread_messages(nos_thread_t *self) {
     while (1) {
-        nos_buffer_t *local_msgs[64];
-        uint32_t count = 0;
-
-        /* 批量从公共队列挪到本地私有数组，减少锁持有时间 */
-        pthread_spin_lock(&self->queue_lock);
-        while (self->head != self->tail && count < 64) {
-            local_msgs[count++] = self->msg_queue[self->head];
+        nos_buffer_t *buf = NULL;
+        pthread_mutex_lock(&self->queue_lock);
+        if (self->head != self->tail) {
+            buf = self->msg_queue[self->head];
             self->head = (self->head + 1) % MAX_QUEUE_SIZE;
         }
-        pthread_spin_unlock(&self->queue_lock);
-
-        if (count == 0) break;
-
-        for (uint32_t i = 0; i < count; i++) {
-            nos_service_msg_t *header = (nos_service_msg_t *)local_msgs[i]->data;
-            service_entry_t *entry = find_service_entry(header->dst_service);
-            if (entry && entry->local_provider && entry->local_provider->on_msg) {
-                entry->local_provider->on_msg(entry->local_provider, header);
-            }
-            nos_buffer_release(local_msgs[i]);
-        }
+        pthread_mutex_unlock(&self->queue_lock);
         
-        /* 如果一次没拿完，继续拿，直到公共队列为空 */
+        if (!buf) break;
+
+        nos_service_msg_t *header = (nos_service_msg_t *)buf->data;
+        service_entry_t *entry = find_service_entry(header->dst_service);
+        if (entry && entry->local_provider && entry->local_provider->on_msg) {
+            entry->local_provider->on_msg(entry->local_provider, header);
+        }
+        nos_buffer_release(buf);
     }
 }
 
@@ -393,9 +380,7 @@ void nos_scheduler_stop(nos_thread_t *thread) {
     if (thread) { 
         thread->stop_requested = 1;
         uint64_t val = 1;
-        if (write(thread->notify_fd, &val, sizeof(val)) < 0) {
-            /* 忽略 EAGAIN */
-        }
+        if (write(thread->notify_fd, &val, sizeof(val)) < 0) { /* Ignore */ }
     }
 }
 
@@ -427,7 +412,6 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
             if (entry->fd == self->notify_fd) {
                 uint64_t val;
                 if (read(self->notify_fd, &val, sizeof(val)) > 0) {
-                    /* 唤醒后处理消息 */
                     process_thread_messages(self);
                 }
             } else {
@@ -454,9 +438,7 @@ nos_status_t nos_timer_start(nos_component_t *self, nos_timer_t *timer, uint32_t
     heapify_up(thread, thread->timer_heap.size++);
     
     uint64_t val = 1;
-    if (write(thread->notify_fd, &val, sizeof(val)) < 0) {
-        /* 忽略 EAGAIN */
-    }
+    if (write(thread->notify_fd, &val, sizeof(val)) < 0) { /* Ignore */ }
     return NOS_OK;
 }
 
