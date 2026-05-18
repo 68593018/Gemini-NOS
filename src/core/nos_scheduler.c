@@ -139,8 +139,19 @@ nos_status_t nos_scheduler_init_thread(nos_thread_t *thread, uint32_t id, const 
     pthread_mutex_init(&thread->queue_lock, NULL);
     thread->epoll_fd = epoll_create1(0);
     pipe(thread->notify_fd);
+    /* 设置读写端均为非阻塞，防止写满时死锁 */
     fcntl(thread->notify_fd[0], F_SETFL, O_NONBLOCK);
-    struct epoll_event ev = {.events = EPOLLIN, .data.fd = thread->notify_fd[0]};
+    fcntl(thread->notify_fd[1], F_SETFL, O_NONBLOCK);
+
+    /* 为 notify_fd 建立专门的 entry，避免在 64 位系统下与 ptr 碰撞 */
+    thread->notify_entry.fd = thread->notify_fd[0];
+    thread->notify_entry.callback = NULL; /* 特殊标识 */
+    thread->notify_entry.arg = thread;
+
+    struct epoll_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.events = EPOLLIN;
+    ev.data.ptr = &thread->notify_entry;
     epoll_ctl(thread->epoll_fd, EPOLL_CTL_ADD, thread->notify_fd[0], &ev);
     thread->timer_heap.capacity = 128;
     thread->timer_heap.size = 0;
@@ -281,7 +292,15 @@ static nos_status_t nos_transport_local_send(nos_buffer_t *buf, nos_thread_t *ta
     target_thread->msg_queue[target_thread->tail] = buf;
     target_thread->tail = next_tail;
     pthread_mutex_unlock(&target_thread->queue_lock);
-    char notify_cmd = 'm'; write(target_thread->notify_fd[1], &notify_cmd, 1);
+    
+    char notify_cmd = 'm';
+    /* 
+     * 使用非阻塞写。如果 pipe 满了，说明接收方已经被通知且尚未处理完，
+     * 我们不需要阻塞，因为现有的通知足以让它处理完队列中新增的消息。
+     */
+    if (write(target_thread->notify_fd[1], &notify_cmd, 1) < 0) {
+        /* 忽略 EAGAIN/EWOULDBLOCK */
+    }
     return NOS_OK;
 }
 
@@ -357,7 +376,12 @@ static void process_thread_messages(nos_thread_t *self) {
 }
 
 void nos_scheduler_stop(nos_thread_t *thread) {
-    if (thread) { char notify_cmd = 'q'; write(thread->notify_fd[1], &notify_cmd, 1); }
+    if (thread) { 
+        char notify_cmd = 'q'; 
+        if (write(thread->notify_fd[1], &notify_cmd, 1) < 0) {
+            /* 忽略 EAGAIN/EWOULDBLOCK */
+        }
+    }
 }
 
 nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
@@ -381,14 +405,26 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
         int nfds = epoll_wait(self->epoll_fd, events, MAX_EVENTS, timeout);
         process_timers(self);
         for (int i = 0; i < nfds; i++) {
-            if (events[i].data.fd == self->notify_fd[0]) {
-                char cmd; if (read(self->notify_fd[0], &cmd, 1) > 0) {
-                    if (cmd == 'q') { running = 0; nos_sys_log_info("Thread '%s' exit command received.", self->name); }
-                    else if (cmd == 'm') process_thread_messages(self);
+            nos_fd_entry_t *entry = (nos_fd_entry_t *)events[i].data.ptr;
+            if (!entry) continue;
+
+            if (entry->fd == self->notify_fd[0]) {
+                char cmds[256];
+                /* 尽可能排干通知管道，防止由于累积导致的频繁唤醒 */
+                ssize_t n = read(self->notify_fd[0], cmds, sizeof(cmds));
+                if (n > 0) {
+                    for (ssize_t j = 0; j < n; j++) {
+                        if (cmds[j] == 'q') { 
+                            running = 0; 
+                            nos_sys_log_info("Thread '%s' exit command received.", self->name);
+                            break;
+                        } else if (cmds[j] == 'm') {
+                            process_thread_messages(self);
+                        }
+                    }
                 }
             } else {
-                nos_fd_entry_t *entry = (nos_fd_entry_t *)events[i].data.ptr;
-                if (entry && entry->callback) entry->callback(entry->fd, entry->arg);
+                if (entry->callback) entry->callback(entry->fd, entry->arg);
             }
         }
     }
@@ -409,7 +445,10 @@ nos_status_t nos_timer_start(nos_component_t *self, nos_timer_t *timer, uint32_t
     timer->is_periodic = is_periodic; timer->is_running = 1; timer->owner_thread = thread;
     thread->timer_heap.nodes[thread->timer_heap.size] = timer;
     heapify_up(thread, thread->timer_heap.size++);
-    char notify_cmd = 't'; write(thread->notify_fd[1], &notify_cmd, 1);
+    char notify_cmd = 't'; 
+    if (write(thread->notify_fd[1], &notify_cmd, 1) < 0) {
+        /* 忽略 EAGAIN/EWOULDBLOCK */
+    }
     return NOS_OK;
 }
 

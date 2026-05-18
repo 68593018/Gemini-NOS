@@ -248,7 +248,8 @@ static void* node_cli_thread_entry(void *arg) {
     if (is_tty) printf("[CLI] Management interface started. (Tab for completion, Up for history)\n");
     while (g_node_ctx.keep_running) {
         int len = is_tty ? advanced_get_line(buf, sizeof(buf), prompt) : (fgets(buf, sizeof(buf), stdin) ? (int)strlen(buf) : -1);
-        if (len < 0) break; if (len == 0) continue;
+        if (len < 0) break; 
+        if (len == 0) continue;
         if (!is_tty) buf[strcspn(buf, "\n")] = 0;
         history_add(buf);
         int found = 0;

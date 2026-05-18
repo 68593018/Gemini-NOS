@@ -35,6 +35,7 @@ typedef struct nos_thread_s {
     
     int epoll_fd;               /**< epoll 句柄 */
     int notify_fd[2];           /**< 唤醒管道 (0:read, 1:write) */
+    nos_fd_entry_t notify_entry; /**< 专门用于唤醒管道的 entry */
     
     pthread_mutex_t queue_lock; /**< 队列锁 */
     nos_buffer_t **msg_queue;
