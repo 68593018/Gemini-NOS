@@ -21,7 +21,8 @@ CORE_SRCS = src/core/nos_scheduler.c \
 CORE_OBJS = $(patsubst %.c, %.o, $(CORE_SRCS))
 
 # 组件定义
-COMP_LIBS = libcomp-1.so libcomp-2.so libcomp-3.so libcomp-4.so libcomp-5.so
+COMP_LIBS = libcomp-1.so libcomp-2.so libcomp-3.so libcomp-4.so libcomp-5.so \
+            libcomp-ping.so libcomp-pong.so
 
 all: include/nos_ids.h $(COMP_LIBS) nos_ProcA nos_ProcB
 
@@ -53,6 +54,10 @@ libcomp-3.so: src/components/model_3/model_3.c include/nos_ids.h
 libcomp-4.so: src/components/model_4/model_4.c include/nos_ids.h
 	@$(CC) $(CFLAGS) -shared $< -o $@
 libcomp-5.so: src/components/model_5/model_5.c include/nos_ids.h
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-ping.so: src/components/perf/ping.c include/nos_ids.h
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-pong.so: src/components/perf/pong.c include/nos_ids.h
 	@$(CC) $(CFLAGS) -shared $< -o $@
 
 clean:

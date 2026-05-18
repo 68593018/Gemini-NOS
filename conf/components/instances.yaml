@@ -52,3 +52,20 @@ components:
       - "SVC_LOG"
       - "SVC_DATA_PROC"
       - "SVC_KV_DB"
+
+  - name: "Comp-Ping"
+    model: "ModelPing"
+    id: 10
+    provides:
+      - { name: "SVC_PING", id: 111, type: "remote" }
+    requires:
+      - "SVC_LOG"
+      - "SVC_PONG"
+
+  - name: "Comp-Pong"
+    model: "ModelPong"
+    id: 11
+    provides:
+      - { name: "SVC_PONG", id: 112, type: "remote" }
+    requires:
+      - "SVC_LOG"

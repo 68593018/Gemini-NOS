@@ -7,3 +7,7 @@ nodes:
         components: ["Comp-1", "Comp-3"]
       - name: "Worker-2"
         components: ["Comp-2", "Comp-5"]
+      - name: "Worker-3"
+        components: ["Comp-Ping"]
+      - name: "Worker-4"
+        components: ["Comp-Pong"]

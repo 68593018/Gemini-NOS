@@ -7,6 +7,8 @@
 #define COMP_3               3
 #define COMP_4               4
 #define COMP_5               5
+#define COMP_PING            10
+#define COMP_PONG            11
 
 /* Service IDs */
 #define SVC_LOG              1
@@ -16,6 +18,8 @@
 #define SVC_ROUTING_V4       102
 #define SVC_ROUTING_V6       105
 #define SVC_PERF_RX          110
+#define SVC_PING             111
+#define SVC_PONG             112
 #define SVC_DATA_PROC        204
 
 #endif

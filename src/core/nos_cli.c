@@ -195,11 +195,11 @@ static void do_perf_start(const char *args) {
     if (buf) {
         nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
         msg->magic = NOS_IPC_MAGIC;
-        msg->dst_service = 110; // SVC_PERF_RX (Comp-3)
+        msg->dst_service = 111; // SVC_PING (Comp-Ping)
         msg->msg_code = 3001; // START_TEST
         msg->payload_len = sizeof(uint32_t);
         memcpy(msg + 1, &count, sizeof(uint32_t));
-        printf("[CLI] Triggering performance test with %u iterations...\n", count);
+        printf("[CLI] Triggering specialized performance test with %u iterations...\n", count);
         nos_service_msg_send(buf);
         nos_buffer_release(buf);
     }

@@ -9,3 +9,7 @@ models:
     lib: "libcomp-4.so"
   - name: "Model5"
     lib: "libcomp-5.so"
+  - name: "ModelPing"
+    lib: "libcomp-ping.so"
+  - name: "ModelPong"
+    lib: "libcomp-pong.so"
