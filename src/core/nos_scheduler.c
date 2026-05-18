@@ -400,11 +400,13 @@ nos_status_t nos_scheduler_run_loop(nos_thread_t *self) {
     }
     nos_sys_log_info("Thread '%s' loop started.", self->name);
     struct epoll_event events[MAX_EVENTS];
+    extern nos_node_ctx_t g_node_ctx;
+    uint32_t poll_cycles = (g_node_ctx.node_def) ? g_node_ctx.node_def->busy_poll_cycles : 500;
     
     while (!self->stop_requested) {
         /* Busy spin to process messages without kernel intervention if possible */
         int spun = 0;
-        for (int spin = 0; spin < 5000; spin++) {
+        for (uint32_t spin = 0; spin < poll_cycles; spin++) {
             if (self->head != self->tail) {
                 spun = 1;
                 break;

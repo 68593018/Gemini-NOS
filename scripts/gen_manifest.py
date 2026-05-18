@@ -36,6 +36,8 @@ def parse_yaml_fallback(file_path):
                 data["nodes"][-1]["uds_path"] = content.split(":")[1].strip().strip('"')
             elif "buffer_profile:" in content:
                 data["nodes"][-1]["buffer_profile"] = content.split(":")[1].strip().strip('"')
+            elif "busy_poll_cycles:" in content:
+                data["nodes"][-1]["busy_poll_cycles"] = int(content.split(":")[1].strip())
             elif content.startswith("- name:") and indent > 4:
                 data["nodes"][-1]["threads"].append({"name": content.split(":")[1].strip().strip('"'), "components": []})
             elif "components:" in content:
@@ -155,7 +157,7 @@ def generate_node_manifest(node, output_path):
     inits_str = " ,".join(node["platform_inits"]) if node["platform_inits"] else ""
     c_content.append(f'static const nos_platform_init_func_t g_infra_inits[] = {{ {inits_str}{" ," if inits_str else ""} NULL }};')
     c_content.append('const nos_node_def_t g_local_node_def = {')
-    c_content.append(f'    .name = "{node["name"]}", .uds_path = "{node["uds_path"]}", .buffer_pools = g_local_pools,')
+    c_content.append(f'    .name = "{node["name"]}", .uds_path = "{node["uds_path"]}", .buffer_pools = g_local_pools, .busy_poll_cycles = {node.get("busy_poll_cycles", 500)},')
     c_content.append('    .threads = {')
     for thread in node["threads"]:
         ids, names, libs = ", ".join(map(str, thread["comp_ids"])), ", ".join(f'"{n}"' for n in thread["comp_names"]), ", ".join(f'"{l}"' for l in thread["comp_libs"])

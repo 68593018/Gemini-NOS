@@ -33,6 +33,7 @@ static void do_show_db(const char *args);
 static void do_show_memory(const char *args);
 static void do_log(const char *args);
 static void do_perf_start(const char *args);
+static void do_perf_remote_start(const char *args);
 static void do_load(const char *args);
 static void do_unload(const char *args);
 static void do_reload(const char *args);
@@ -51,6 +52,7 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {"show memory",     "Show process memory consumption",  do_show_memory},
     {"log",             "Manage logging (stats, level)",    do_log},
     {"perf start",      "Start IPC performance test",       do_perf_start},
+    {"perf remote",     "Start Cross-Process IPC test",     do_perf_remote_start},
     {"load",            "Load a component by name",         do_load},
     {"unload",          "Unload a component by name",       do_unload},
     {"reload",          "Reload a component (Stateless check)", do_reload},
@@ -204,6 +206,22 @@ static void do_perf_start(const char *args) {
         nos_buffer_release(buf);
     }
 }
+static void do_perf_remote_start(const char *args) {
+    uint32_t count = args ? (uint32_t)atoi(args) : 10000;
+    if (count == 0) count = 10000;
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + sizeof(uint32_t), 0);
+    if (buf) {
+        nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+        msg->magic = NOS_IPC_MAGIC;
+        msg->dst_service = 113; // SVC_REMOTE_PING (Comp-RemotePing)
+        msg->msg_code = 3001; // START_TEST
+        msg->payload_len = sizeof(uint32_t);
+        memcpy(msg + 1, &count, sizeof(uint32_t));
+        printf("[CLI] Triggering cross-process performance test with %u iterations...\n", count);
+        nos_service_msg_send(buf);
+        nos_buffer_release(buf);
+    }
+}
 static void do_load(const char *args) { if (args) node_reload_component(args); }
 static void do_reload(const char *args) { if (args) node_reload_component(args); }
 static void do_unload(const char *args) { if (args) node_unload_component(args); }
@@ -236,6 +254,9 @@ static void handle_tab_completion(char *buf, int *pos, const char *prompt) {
                 const char *log_args[] = {"stats", "level", "spam", NULL};
                 for (int i = 0; log_args[i]; i++) if (strncmp(log_args[i], match_start, match_len) == 0) suggestions[sug_count++] = log_args[i];
             }
+        } else if (strncmp(buf, "perf ", 5) == 0) {
+            const char *perf_args[] = {"start", "remote", NULL};
+            for (int i = 0; perf_args[i]; i++) if (strncmp(perf_args[i], match_start, match_len) == 0) suggestions[sug_count++] = perf_args[i];
         } else if (strncmp(buf, "show ", 5) == 0) {
             const char *show_args[] = {"components", "services", "db", "memory", NULL};
             for (int i = 0; show_args[i]; i++) if (strncmp(show_args[i], match_start, match_len) == 0) suggestions[sug_count++] = show_args[i];

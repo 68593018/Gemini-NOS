@@ -36,6 +36,7 @@ typedef struct {
     nos_thread_def_t threads[8]; /**< 进程内的线程列表 (空名字结束) */
     const struct nos_service_def_s *services;  /**< 该节点关注的服务列表 (按需生成) */
     uint32_t service_count; /**< 服务列表数量 */
+    uint32_t busy_poll_cycles; /**< 用户态轮询最大自旋次数 (0 表示纯阻塞) */
     const nos_platform_init_func_t *platform_inits; /**< 平台基础设施初始化函数列表 (NULL 结束) */
 } nos_node_def_t;
 
