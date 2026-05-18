@@ -208,6 +208,57 @@ static void do_load(const char *args) { if (args) node_reload_component(args); }
 static void do_reload(const char *args) { if (args) node_reload_component(args); }
 static void do_unload(const char *args) { if (args) node_unload_component(args); }
 
+static void handle_tab_completion(char *buf, int *pos, const char *prompt) {
+    buf[*pos] = '\0';
+    const char *suggestions[64];
+    int sug_count = 0;
+    const char *match_start = buf;
+    int match_len = *pos;
+
+    /* 1. 尝试匹配顶层命令 (来自 g_cli_cmds) */
+    for (int i = 0; g_cli_cmds[i].name; i++) {
+        if (strncmp(g_cli_cmds[i].name, buf, *pos) == 0) {
+            suggestions[sug_count++] = g_cli_cmds[i].name;
+        }
+    }
+
+    /* 2. 如果没有顶层匹配，或者已经输入了空格，尝试匹配子命令/参数 */
+    char *last_space = strrchr(buf, ' ');
+    if (sug_count == 0 && last_space) {
+        match_start = last_space + 1;
+        match_len = (int)(buf + *pos - match_start);
+
+        if (strncmp(buf, "log ", 4) == 0) {
+            if (strncmp(buf, "log level ", 10) == 0) {
+                const char *levels[] = {"DEBUG", "INFO", "WARN", "ERROR", NULL};
+                for (int i = 0; levels[i]; i++) if (strncmp(levels[i], match_start, match_len) == 0) suggestions[sug_count++] = levels[i];
+            } else if (last_space == buf + 3) {
+                const char *log_args[] = {"stats", "level", "spam", NULL};
+                for (int i = 0; log_args[i]; i++) if (strncmp(log_args[i], match_start, match_len) == 0) suggestions[sug_count++] = log_args[i];
+            }
+        } else if (strncmp(buf, "show ", 5) == 0) {
+            const char *show_args[] = {"components", "services", "db", "memory", NULL};
+            for (int i = 0; show_args[i]; i++) if (strncmp(show_args[i], match_start, match_len) == 0) suggestions[sug_count++] = show_args[i];
+        } else if (strncmp(buf, "load ", 5) == 0 || strncmp(buf, "unload ", 7) == 0 || strncmp(buf, "reload ", 7) == 0) {
+            for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
+                if (strncmp(g_node_ctx.loaded_info[i].comp->name, match_start, match_len) == 0) {
+                    suggestions[sug_count++] = g_node_ctx.loaded_info[i].comp->name;
+                }
+            }
+        }
+    }
+
+    if (sug_count == 1) {
+        printf("%s", suggestions[0] + match_len);
+        strcpy(buf + *pos, suggestions[0] + match_len);
+        *pos = (int)strlen(buf);
+    } else if (sug_count > 1) {
+        printf("\n");
+        for (int i = 0; i < sug_count; i++) printf("%s  ", suggestions[i]);
+        printf("\n%s%s", prompt, buf);
+    }
+}
+
 static int advanced_get_line(char *buf, int size, const char *prompt) {
     struct termios oldt, newt;
     int pos = 0; char c; int h_idx = -1;
@@ -229,13 +280,7 @@ static int advanced_get_line(char *buf, int size, const char *prompt) {
         } else if (c == 127 || c == 8) {
             if (pos > 0) { pos--; printf("\b \b"); }
         } else if (c == '\t') {
-            buf[pos] = '\0'; int matches = 0, last = -1;
-            for (int i = 0; g_cli_cmds[i].name; i++) if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) { matches++; last = i; }
-            if (matches == 1) { printf("%s", g_cli_cmds[last].name + pos); strcpy(buf + pos, g_cli_cmds[last].name + pos); pos = (int)strlen(buf); }
-            else if (matches > 1) {
-                printf("\n"); for (int i = 0; g_cli_cmds[i].name; i++) if (strncmp(g_cli_cmds[i].name, buf, pos) == 0) printf("%s  ", g_cli_cmds[i].name);
-                printf("\n%s%s", prompt, buf);
-            }
+            handle_tab_completion(buf, &pos, prompt);
         } else { buf[pos++] = c; printf("%c", c); }
         fflush(stdout);
     }
