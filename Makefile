@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Iinclude -Wall -O3 -fPIC -ffunction-sections -fdata-sections
+CFLAGS = -Iinclude -Wall -fPIC -ffunction-sections -fdata-sections
 LDFLAGS = -lpthread -ldl -rdynamic -Wl,--gc-sections
 PYTHON = python3
 GEN_SCRIPT = scripts/gen_manifest.py
@@ -22,7 +22,8 @@ CORE_OBJS = $(patsubst %.c, %.o, $(CORE_SRCS))
 
 # 组件定义
 COMP_LIBS = libcomp-1.so libcomp-2.so libcomp-3.so libcomp-4.so libcomp-5.so \
-            libcomp-ping.so libcomp-pong.so
+            libcomp-ping.so libcomp-pong.so \
+            libcomp-rping.so libcomp-rpong.so
 
 all: include/nos_ids.h $(COMP_LIBS) nos_ProcA nos_ProcB
 
@@ -58,6 +59,10 @@ libcomp-5.so: src/components/model_5/model_5.c include/nos_ids.h
 libcomp-ping.so: src/components/perf/ping.c include/nos_ids.h
 	@$(CC) $(CFLAGS) -shared $< -o $@
 libcomp-pong.so: src/components/perf/pong.c include/nos_ids.h
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-rping.so: src/components/perf/remote_ping.c include/nos_ids.h
+	@$(CC) $(CFLAGS) -shared $< -o $@
+libcomp-rpong.so: src/components/perf/remote_pong.c include/nos_ids.h
 	@$(CC) $(CFLAGS) -shared $< -o $@
 
 clean:

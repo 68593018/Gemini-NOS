@@ -13,3 +13,7 @@ models:
     lib: "libcomp-ping.so"
   - name: "ModelPong"
     lib: "libcomp-pong.so"
+  - name: "ModelRPing"
+    lib: "libcomp-rping.so"
+  - name: "ModelRPong"
+    lib: "libcomp-rpong.so"
