@@ -211,17 +211,24 @@ static void do_perf_start(const char *args) {
     }
 }
 static void do_perf_remote_start(const char *args) {
-    uint32_t count = args ? (uint32_t)atoi(args) : 10000;
+    uint32_t count = 10000;
+    uint32_t size = 0;
+    if (args) {
+        sscanf(args, "%u %u", &count, &size);
+    }
     if (count == 0) count = 10000;
-    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + sizeof(uint32_t), 0);
+
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 8, 0);
     if (buf) {
         nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
         msg->magic = NOS_IPC_MAGIC;
         msg->dst_service = 113; // SVC_REMOTE_PING (Comp-RemotePing)
         msg->msg_code = 3001; // START_TEST
-        msg->payload_len = sizeof(uint32_t);
-        memcpy(msg + 1, &count, sizeof(uint32_t));
-        printf("[CLI] Triggering cross-process performance test with %u iterations...\n", count);
+        msg->payload_len = 8;
+        uint32_t *payload = (uint32_t*)(msg + 1);
+        payload[0] = count;
+        payload[1] = size;
+        printf("[CLI] Triggering cross-process performance test: %u iterations, %u byte payload...\n", count, size);
         nos_service_msg_send(buf);
         nos_buffer_release(buf);
     }
@@ -280,6 +287,9 @@ static void handle_tab_completion(char *buf, int *pos, const char *prompt) {
         match_len = (int)(buf + *pos - match_start);
 
         if (strncmp(buf, "log ", 4) == 0) {
+            if (strcmp(buf, "log level ") == 0) {
+                printf("\nHint: <level> | <comp_id> <level>\n%s%s", prompt, buf); return;
+            }
             if (strncmp(buf, "log level ", 10) == 0) {
                 const char *levels[] = {"DEBUG", "INFO", "WARN", "ERROR", NULL};
                 for (int i = 0; levels[i]; i++) if (strncmp(levels[i], match_start, match_len) == 0) suggestions[sug_count++] = levels[i];
@@ -288,6 +298,11 @@ static void handle_tab_completion(char *buf, int *pos, const char *prompt) {
                 for (int i = 0; log_args[i]; i++) if (strncmp(log_args[i], match_start, match_len) == 0) suggestions[sug_count++] = log_args[i];
             }
         } else if (strncmp(buf, "perf ", 5) == 0) {
+            if (strcmp(buf, "perf start ") == 0) {
+                printf("\nHint: <count>\n%s%s", prompt, buf); return;
+            } else if (strcmp(buf, "perf remote ") == 0) {
+                printf("\nHint: <count> [payload_size]\n%s%s", prompt, buf); return;
+            }
             const char *perf_args[] = {"start", "remote", NULL};
             for (int i = 0; perf_args[i]; i++) if (strncmp(perf_args[i], match_start, match_len) == 0) suggestions[sug_count++] = perf_args[i];
         } else if (strncmp(buf, "show ", 5) == 0) {
