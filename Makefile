@@ -26,7 +26,7 @@ COMP_LIBS = libcomp-1.so libcomp-2.so libcomp-3.so libcomp-4.so libcomp-5.so \
             libcomp-ping.so libcomp-pong.so \
             libcomp-rping.so libcomp-rpong.so
 
-all: include/nos_ids.h $(COMP_LIBS) nos_ProcA nos_ProcB
+all: include/nos_ids.h $(COMP_LIBS) nos_ProcA nos_ProcB nos_daemon
 
 include/nos_ids.h: $(shell find $(CONFIG_DIR) -name "*.yaml") $(GEN_SCRIPT)
 	@echo "Generating manifests and ID headers..."
@@ -43,6 +43,10 @@ nos_ProcA: $(CORE_OBJS) src/core/manifest_ProcA.o
 	@$(CC) $^ -o $@ $(LDFLAGS)
 
 nos_ProcB: $(CORE_OBJS) src/core/manifest_ProcB.o
+	@echo "Linking binary $@..."
+	@$(CC) $^ -o $@ $(LDFLAGS)
+
+nos_daemon: $(filter-out src/core/nos_node_main.o, $(CORE_OBJS)) src/core/nos_daemon_main.o
 	@echo "Linking binary $@..."
 	@$(CC) $^ -o $@ $(LDFLAGS)
 

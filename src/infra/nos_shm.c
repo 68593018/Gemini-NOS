@@ -48,16 +48,30 @@ static void init_shm_pool(void) {
     atomic_init(&g_shm_hdr->total_allocated, 0);
 }
 
-nos_status_t nos_shm_init(const char *node_name) {
+nos_status_t _nos_shm_create_and_init(void) {
     int fd = shm_open(NOS_SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (fd < 0) return NOS_ERR;
 
-    struct stat st;
-    fstat(fd, &st);
-    int is_creator = 0;
-    if (st.st_size == 0) {
-        if (ftruncate(fd, NOS_SHM_SIZE) < 0) { close(fd); return NOS_ERR; }
-        is_creator = 1;
+    if (ftruncate(fd, NOS_SHM_SIZE) < 0) { close(fd); return NOS_ERR; }
+
+    g_shm_base = mmap(NULL, NOS_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (g_shm_base == MAP_FAILED) return NOS_ERR;
+
+    g_shm_hdr = (nos_shm_header_t *)g_shm_base;
+    memset(g_shm_hdr, 0, sizeof(nos_shm_header_t));
+    init_shm_pool();
+    
+    /* 最后写入 Magic，作为初始化完成的标志 */
+    atomic_store_explicit((_Atomic uint32_t*)&g_shm_hdr->magic, SHM_MAGIC, memory_order_release);
+    return NOS_OK;
+}
+
+nos_status_t nos_shm_init(const char *node_name) {
+    int fd = shm_open(NOS_SHM_NAME, O_RDWR, 0666);
+    if (fd < 0) {
+        nos_sys_log_error("SHM not created by Daemon yet.");
+        return NOS_ERR;
     }
 
     g_shm_base = mmap(NULL, NOS_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -66,14 +80,11 @@ nos_status_t nos_shm_init(const char *node_name) {
 
     g_shm_hdr = (nos_shm_header_t *)g_shm_base;
 
-    if (is_creator) {
-        memset(g_shm_hdr, 0, sizeof(nos_shm_header_t));
-        g_shm_hdr->magic = SHM_MAGIC;
-        g_shm_hdr->version = 1;
-        init_shm_pool();
-    } else {
-        /* 等待创建者初始化完成 */
-        while (g_shm_hdr->magic != SHM_MAGIC) usleep(1000);
+    /* 等待 Daemon 初始化完成 */
+    int wait_count = 0;
+    while (atomic_load_explicit((_Atomic uint32_t*)&g_shm_hdr->magic, memory_order_acquire) != SHM_MAGIC) {
+        if (++wait_count > 50) return NOS_ERR; // 等待超时 500ms
+        usleep(10000);
     }
 
     /* 注册本地节点 */
