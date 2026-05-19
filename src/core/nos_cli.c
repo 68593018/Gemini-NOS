@@ -241,8 +241,8 @@ static void do_show_ipc(const char *args) {
            s->dropped_full, s->buffer_alloc_fails);
 
     printf("\n--- IPC Connection Status ---\n");
-    printf("%-30s %-4s %-10s %-12s %-6s\n", "UDS-Path", "FD", "Status", "Queue(H/T)", "Congest");
-    printf("----------------------------------------------------------------------------\n");
+    printf("%-15s %-25s %-4s %-10s %-12s %-6s\n", "Remote-Node", "UDS-Path", "FD", "Status", "Queue(H/T)", "Congest");
+    printf("--------------------------------------------------------------------------------\n");
     
     char conn_info[16 * 256];
     extern uint32_t nos_ipc_get_conn_snapshot(char *out_buf, uint32_t max_count);

@@ -117,7 +117,8 @@ void node_setup_routing(const char *current_node_name) {
             if (provider && owner_worker) nos_service_register_provider_bind(svc->service_id, provider, owner_worker);
         } else {
             if (svc->remote_uds_path && strlen(svc->remote_uds_path) > 0) {
-                nos_service_register_remote(svc->service_id, svc->remote_uds_path);
+                extern nos_status_t nos_service_register_remote_ex(uint32_t service_id, const char *node_name, const char *uds_path);
+                nos_service_register_remote_ex(svc->service_id, svc->node_name, svc->remote_uds_path);
                 nos_sys_log_info("Routing: Remote Service %u -> %s (%s)", svc->service_id, svc->node_name, svc->remote_uds_path);
             }
         }

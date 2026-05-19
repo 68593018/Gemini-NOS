@@ -25,6 +25,7 @@
  * @brief IPC 连接上下文 (支持异步发送)
  */
 typedef struct {
+    char node_name[32];         // 远程节点标识
     char uds_path[108];
     int fd;
     nos_buffer_t *tx_queue[TX_QUEUE_SIZE];
@@ -39,6 +40,10 @@ typedef struct {
 static nos_ipc_conn_t g_remote_conns[MAX_REMOTE_CONNS];
 static uint32_t g_remote_conn_count = 0;
 static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* 静态函数前置声明 */
+static void nos_ipc_event_handler(int fd, void *arg);
+static nos_ipc_conn_t* get_or_create_conn(const char *node_name, const char *uds_path);
 
 /**
  * @brief 尝试从队列中发送数据
@@ -128,9 +133,33 @@ static void nos_ipc_recv_handler(int fd, nos_ipc_conn_t *conn, nos_thread_t *thr
 
     ssize_t ret = recv(fd, buf->data, full_msg_len, MSG_DONTWAIT);
     if (ret == (ssize_t)full_msg_len) {
-        atomic_fetch_add(&g_node_ctx.stats.rx_packets, 1);
-        atomic_fetch_add(&g_node_ctx.stats.rx_bytes, ret);
-        nos_service_msg_send(buf);
+        nos_service_msg_t *header = (nos_service_msg_t *)buf->data;
+        
+        /* 处理身份握手控制报文 */
+        if (header->msg_code == NOS_IPC_MSG_HELLO) {
+            char *remote_name = (char*)(header + 1);
+            if (conn) {
+                strncpy(conn->node_name, remote_name, 31);
+                nos_sys_log_info("IPC Handshake complete: Remote Node is %s", remote_name);
+            } else {
+                /* 被动连接升级为有名连接 */
+                nos_ipc_conn_t *new_conn = get_or_create_conn(remote_name, NULL);
+                if (new_conn) {
+                    pthread_mutex_lock(&new_conn->lock);
+                    new_conn->fd = fd;
+                    new_conn->is_connected = 1;
+                    /* 修改 epoll 监听以支持双向收发 */
+                    nos_scheduler_remove_fd(thread, fd);
+                    nos_scheduler_add_fd_ex(new_conn->owner_thread, fd, EPOLLIN | EPOLLOUT | EPOLLET, nos_ipc_event_handler, new_conn);
+                    pthread_mutex_unlock(&new_conn->lock);
+                    nos_sys_log_info("IPC Passive connection promoted to Node %s (FD:%d)", remote_name, fd);
+                }
+            }
+        } else {
+            atomic_fetch_add(&g_node_ctx.stats.rx_packets, 1);
+            atomic_fetch_add(&g_node_ctx.stats.rx_bytes, ret);
+            nos_service_msg_send(buf);
+        }
     } else {
         nos_sys_log_error("Partial recv or error on SEQPACKET.");
         atomic_fetch_add(&g_node_ctx.stats.rx_errors, 1);
@@ -155,10 +184,12 @@ static void nos_ipc_event_handler(int fd, void *arg) {
 /**
  * @brief 内部函数：获取或建立跨进程连接
  */
-static nos_ipc_conn_t* get_or_create_conn(const char *uds_path) {
+static nos_ipc_conn_t* get_or_create_conn(const char *node_name, const char *uds_path) {
     pthread_mutex_lock(&g_pool_lock);
     for (uint32_t i = 0; i < g_remote_conn_count; i++) {
-        if (strcmp(g_remote_conns[i].uds_path, uds_path) == 0) {
+        /* 优先匹配 Node Name，若尚未识别则匹配 Path */
+        if ((node_name && strcmp(g_remote_conns[i].node_name, node_name) == 0) ||
+            (uds_path && strcmp(g_remote_conns[i].uds_path, uds_path) == 0)) {
             pthread_mutex_unlock(&g_pool_lock);
             return &g_remote_conns[i];
         }
@@ -169,10 +200,16 @@ static nos_ipc_conn_t* get_or_create_conn(const char *uds_path) {
     }
 
     nos_ipc_conn_t *conn = &g_remote_conns[g_remote_conn_count++];
-    strncpy(conn->uds_path, uds_path, 107);
+    if (node_name) strncpy(conn->node_name, node_name, 31);
+    else strcpy(conn->node_name, "Unknown");
+    
+    if (uds_path) strncpy(conn->uds_path, uds_path, 107);
+    else strcpy(conn->uds_path, "Passive");
+
     conn->fd = -1;
     conn->head = conn->tail = 0;
     conn->is_connected = 0;
+    conn->is_congested = 0;
     pthread_mutex_init(&conn->lock, NULL);
     conn->owner_thread = g_node_ctx.mgmt_thread; // 统一由管理线程处理 IO
     
@@ -181,16 +218,40 @@ static nos_ipc_conn_t* get_or_create_conn(const char *uds_path) {
 }
 
 /**
- * @brief 异步发送入队接口 (组件线程调用)
+ * @brief 发送身份握手报文
  */
-nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
-    nos_ipc_conn_t *conn = get_or_create_conn(uds_path);
+static void nos_ipc_send_hello(nos_ipc_conn_t *conn) {
+    nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t) + 32, 0);
+    if (!buf) return;
+    
+    nos_service_msg_t *msg = (nos_service_msg_t *)buf->data;
+    msg->magic = NOS_IPC_MAGIC;
+    msg->version = NOS_IPC_VERSION;
+    msg->msg_code = NOS_IPC_MSG_HELLO;
+    msg->payload_len = strlen(g_node_ctx.node_def->name) + 1;
+    strcpy((char*)(msg + 1), g_node_ctx.node_def->name);
+    
+    /* 直接入队，不触发递归发送 */
+    uint32_t next_tail = (conn->tail + 1) % TX_QUEUE_SIZE;
+    if (next_tail != conn->head) {
+        nos_buffer_retain(buf);
+        conn->tx_queue[conn->tail] = buf;
+        conn->tail = next_tail;
+    }
+    nos_buffer_release(buf);
+}
+
+/**
+ * @brief 异步发送入队接口 (支持节点名称路由)
+ */
+nos_status_t nos_ipc_send_enqueue_ex(const char *node_name, const char *uds_path, nos_buffer_t *buf) {
+    nos_ipc_conn_t *conn = get_or_create_conn(node_name, uds_path);
     if (!conn) return NOS_ERR;
 
     pthread_mutex_lock(&conn->lock);
     
     /* 1. 自动重连逻辑 */
-    if (conn->fd < 0) {
+    if (conn->fd < 0 && uds_path && strcmp(uds_path, "Passive") != 0) {
         int fd = socket(AF_UNIX, SOCK_SEQPACKET, 0);
         if (fd >= 0) {
             struct sockaddr_un addr = {.sun_family = AF_UNIX};
@@ -200,9 +261,12 @@ nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
                 conn->fd = fd;
                 conn->is_connected = 1;
                 conn->is_congested = 0;
-                /* 使用调度器标准接口注册，监听 IN 和 OUT */
+                /* 使用调度器标准接口注册 */
                 nos_scheduler_add_fd_ex(conn->owner_thread, fd, EPOLLIN | EPOLLOUT | EPOLLET, nos_ipc_event_handler, conn);
-                nos_sys_log_info("IPC connected to %s (FD:%d)", uds_path, fd);
+                nos_sys_log_info("IPC connected to %s (Node:%s, FD:%d)", uds_path, node_name, fd);
+                
+                /* 连接建立后立即发送身份信息 */
+                nos_ipc_send_hello(conn);
             } else {
                 nos_sys_log_error("IPC connect to %s failed: %s", uds_path, strerror(errno));
                 close(fd);
@@ -210,12 +274,18 @@ nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
         }
     }
 
+    /* 如果仍然没连接成功且没有 path (比如被动连接还没握手)，暂存数据或报错 */
+    if (!conn->is_connected) {
+        pthread_mutex_unlock(&conn->lock);
+        return NOS_ERR;
+    }
+
     /* 2. 入队前检查背压 */
     uint32_t used = (conn->tail >= conn->head) ? (conn->tail - conn->head) : (TX_QUEUE_SIZE - (conn->head - conn->tail));
     if (used > TX_HIGH_WATERMARK) {
         if (!conn->is_congested) {
             conn->is_congested = 1;
-            nos_sys_log_warn("IPC backpressure triggered for %s (Queue used: %u)", conn->uds_path, used);
+            nos_sys_log_warn("IPC backpressure triggered for %s (Queue used: %u)", conn->node_name, used);
         }
         pthread_mutex_unlock(&conn->lock);
         atomic_fetch_add(&g_node_ctx.stats.dropped_full, 1);
@@ -235,10 +305,8 @@ nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
     conn->tail = next_tail;
     pthread_mutex_unlock(&conn->lock);
 
-    /* 4. 如果已连接，主动触发一次尝试发送 */
-    if (conn->is_connected) {
-        nos_ipc_process_tx(conn);
-    }
+    /* 4. 主动触发一次尝试发送 */
+    nos_ipc_process_tx(conn);
     
     return NOS_OK;
 }
@@ -303,9 +371,9 @@ uint32_t nos_ipc_get_conn_snapshot(char *out_buf, uint32_t max_count) {
     for (uint32_t i = 0; i < count; i++) {
         nos_ipc_conn_t *c = &g_remote_conns[i];
         pthread_mutex_lock(&c->lock);
-        /* 格式: Path | FD | Status | Head | Tail | Congested */
-        sprintf(out_buf + (i * 256), "%-30s %-4d %-10s %u/%u %s", 
-                c->uds_path, c->fd, c->is_connected ? "Connected" : "Failed",
+        /* 格式: Node | Path | FD | Status | Queue(H/T) | Congest */
+        sprintf(out_buf + (i * 256), "%-15s %-25s %-4d %-10s %u/%u %s", 
+                c->node_name, c->uds_path, c->fd, c->is_connected ? "Connected" : "Failed",
                 c->head, c->tail, c->is_congested ? "YES" : "NO");
         pthread_mutex_unlock(&c->lock);
     }

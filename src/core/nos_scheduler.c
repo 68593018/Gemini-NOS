@@ -28,6 +28,7 @@ typedef struct {
     uint32_t service_id;
     nos_component_t *local_provider;
     nos_thread_t *local_thread;
+    char remote_node_name[32];
     char remote_uds_path[108];
     int is_remote;
 } service_entry_t;
@@ -226,7 +227,7 @@ nos_status_t nos_service_register_provider_bind(uint32_t service_id, nos_compone
     return NOS_OK;
 }
 
-nos_status_t nos_service_register_remote(uint32_t service_id, const char *uds_path) {
+nos_status_t nos_service_register_remote_ex(uint32_t service_id, const char *node_name, const char *uds_path) {
     service_entry_t *entry = find_service_entry(service_id);
     if (!entry) {
         if (g_service_count >= 64) return NOS_ERR;
@@ -234,8 +235,13 @@ nos_status_t nos_service_register_remote(uint32_t service_id, const char *uds_pa
     }
     entry->service_id = service_id;
     entry->is_remote = 1;
-    strncpy(entry->remote_uds_path, uds_path, sizeof(entry->remote_uds_path) - 1);
+    if (node_name) strncpy(entry->remote_node_name, node_name, sizeof(entry->remote_node_name) - 1);
+    if (uds_path) strncpy(entry->remote_uds_path, uds_path, sizeof(entry->remote_uds_path) - 1);
     return NOS_OK;
+}
+
+nos_status_t nos_service_register_remote(uint32_t service_id, const char *uds_path) {
+    return nos_service_register_remote_ex(service_id, "Unknown", uds_path);
 }
 
 nos_status_t nos_scheduler_register_component(nos_thread_t *thread, nos_component_t *comp) {
@@ -313,9 +319,9 @@ static nos_status_t nos_transport_local_send(nos_buffer_t *buf, nos_thread_t *ta
     return NOS_OK;
 }
 
-static nos_status_t nos_transport_remote_uds_send(nos_buffer_t *buf, const char *uds_path) {
-    extern nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf);
-    return nos_ipc_send_enqueue(uds_path, buf);
+static nos_status_t nos_transport_remote_uds_send(nos_buffer_t *buf, const char *node_name, const char *uds_path) {
+    extern nos_status_t nos_ipc_send_enqueue_ex(const char *node_name, const char *uds_path, nos_buffer_t *buf);
+    return nos_ipc_send_enqueue_ex(node_name, uds_path, buf);
 }
 
 nos_status_t nos_service_msg_send(nos_buffer_t *buf) {
@@ -323,7 +329,7 @@ nos_status_t nos_service_msg_send(nos_buffer_t *buf) {
     nos_service_msg_t *header = (nos_service_msg_t *)buf->data;
     service_entry_t *entry = find_service_entry(header->dst_service);
     if (entry) {
-        return entry->is_remote ? nos_transport_remote_uds_send(buf, entry->remote_uds_path) : nos_transport_local_send(buf, entry->local_thread);
+        return entry->is_remote ? nos_transport_remote_uds_send(buf, entry->remote_node_name, entry->remote_uds_path) : nos_transport_local_send(buf, entry->local_thread);
     }
     return NOS_ERR;
 }
