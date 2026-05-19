@@ -9,6 +9,7 @@
 
 static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
     if (msg->msg_code == 2001) { // PING
+        // nos_log_info(self, "Received PING, sending PONG");
         nos_buffer_t *buf = nos_buffer_alloc(sizeof(nos_service_msg_t), 0);
         if (buf) {
             nos_service_msg_t *pong = (nos_service_msg_t *)buf->data;

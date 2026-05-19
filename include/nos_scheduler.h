@@ -60,7 +60,12 @@ typedef struct nos_thread_s {
 } nos_thread_t;
 
 /**
- * @brief 向调度器添加需要监听的文件描述符（如 Socket）
+ * @brief 向调度器添加需要监听的文件描述符（支持自定义事件，如 EPOLLOUT）
+ */
+nos_status_t nos_scheduler_add_fd_ex(nos_thread_t *thread, int fd, uint32_t events, nos_fd_callback_t callback, void *arg);
+
+/**
+ * @brief 向调度器添加需要监听的文件描述符 (默认 EPOLLIN)
  */
 nos_status_t nos_scheduler_add_fd(nos_thread_t *thread, int fd, nos_fd_callback_t callback, void *arg);
 

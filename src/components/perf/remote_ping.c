@@ -48,6 +48,9 @@ static void comp_on_msg(nos_component_t *self, const nos_service_msg_t *msg) {
 
     if (msg->msg_code == 2002) { // PONG
         ctx->current_count++;
+        if (ctx->current_count % 1000 == 0) {
+            nos_log_info(self, "Progress: %u/%u", ctx->current_count, ctx->target_count);
+        }
         if (ctx->current_count < ctx->target_count) {
             send_ping(self);
         } else {

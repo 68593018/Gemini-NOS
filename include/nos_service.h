@@ -17,7 +17,8 @@ typedef struct nos_service_msg_s {
     uint32_t dst_service;      /**< 目标服务 ID */
     uint32_t src_component;    /**< 发送者组件 ID */
     uint32_t msg_code;         /**< 业务操作码 */
-    uint32_t tx_id;            /**< 事务 ID，用于关联 Req/Rsp */
+    uint32_t seq;              /**< 序列号，用于可靠性跟踪 */
+    uint32_t flags;            /**< 消息标志 (如是否通过共享内存) */
     uint32_t payload_len;      /**< 载荷长度 */
 } nos_service_msg_t;
 
