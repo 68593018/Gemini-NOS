@@ -2,7 +2,7 @@ nodes:
   - name: "ProcB"
     uds_path: "/tmp/nos_proc_B.sock"
     buffer_profile: "high_performance_data"
-    busy_poll_cycles: 5000
+    busy_poll_cycles: 200
     threads:
       - name: "Worker-1"
         components: ["Comp-4"]
