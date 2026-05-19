@@ -25,6 +25,7 @@ typedef struct nos_service_msg_s {
 /* IPC 内部控制消息码 (0xFFFF 开头) */
 #define NOS_IPC_MSG_HELLO   0xFFFF0001  /**< 身份握手: Payload 为节点名称字符串 */
 #define NOS_IPC_MSG_BYE     0xFFFF0002  /**< 优雅断开 */
+#define NOS_IPC_MSG_SHM_EVENT 0xFFFF0003 /**< SHM 到达事件 */
 
 /**
  * @brief 嵌入式服务接口列表项
@@ -53,6 +54,8 @@ nos_status_t nos_service_register_remote(uint32_t service_id, const char *uds_pa
  * @param uds_path 目标进程监听的 UDS 路径
  */
 nos_status_t nos_service_register_remote_ex(uint32_t service_id, const char *node_name, const char *uds_path);
+
+nos_status_t nos_ipc_send_enqueue_shm(const char *node_name, const char *uds_path, nos_buffer_t *buf);
 
 /**
  * @brief 嵌入式服务获取接口

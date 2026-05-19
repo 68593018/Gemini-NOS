@@ -118,13 +118,25 @@ nos_buffer_t* nos_buffer_alloc(uint32_t size, uint32_t headroom) {
 }
 
 void nos_buffer_retain(nos_buffer_t *buf) {
-    if (buf) {
-        atomic_fetch_add(&buf->ref_cnt, 1);
+    if (!buf) return;
+    
+    if (buf->flags == 1) {
+        extern void nos_shm_buffer_retain(nos_buffer_t *buf);
+        nos_shm_buffer_retain(buf);
+        return;
     }
+
+    atomic_fetch_add(&buf->ref_cnt, 1);
 }
 
 void nos_buffer_release(nos_buffer_t *buf) {
     if (!buf) return;
+
+    if (buf->flags == 1) {
+        extern void nos_shm_buffer_release(nos_buffer_t *buf);
+        nos_shm_buffer_release(buf);
+        return;
+    }
 
     if (atomic_fetch_sub(&buf->ref_cnt, 1) == 1) {
         pthread_mutex_lock(&g_buffer_lock);

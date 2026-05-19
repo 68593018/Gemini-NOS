@@ -20,6 +20,7 @@ typedef struct {
     _Atomic int ref_cnt;       /**< 引用计数 (原子操作) */
     uint32_t bin_idx;          /**< 属于哪个规格池 (bin) */
     uint32_t pool_idx;         /**< 在 bin 内的索引 */
+    uint32_t flags;            /**< 属性标志 (如 1 表示 SHM Buffer) */
 } nos_buffer_t;
 
 /**

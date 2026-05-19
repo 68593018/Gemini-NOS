@@ -11,6 +11,7 @@
 #include "nos_buffer.h"
 #include "nos_log.h"
 #include "nos_api.h"
+#include "nos_shm.h"
 
 /* 定义并初始化全局上下文 */
 nos_node_ctx_t g_node_ctx = {
@@ -34,6 +35,10 @@ int main(int argc, char *argv[]) {
     if (!node_def) { nos_sys_log_error("Local node manifest not found."); return -1; }
 
     g_node_ctx.node_def = node_def;
+
+    if (nos_shm_init(node_def->name) != NOS_OK) {
+        nos_sys_log_error("Failed to initialize Shared Memory subsystem.");
+    }
 
     /* 按需初始化平台基础设施 (由清单驱动) */
     if (node_def->platform_inits) {

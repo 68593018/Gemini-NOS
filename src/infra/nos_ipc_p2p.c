@@ -13,6 +13,7 @@
 #include "nos_buffer.h"
 #include "nos_api.h"
 #include "nos_node_priv.h"
+#include "nos_shm.h"
 
 #define TX_QUEUE_SIZE 1024
 #define MAX_REMOTE_CONNS 16
@@ -44,6 +45,7 @@ static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 /* 静态函数前置声明 */
 static void nos_ipc_event_handler(int fd, void *arg);
 static nos_ipc_conn_t* get_or_create_conn(const char *node_name, const char *uds_path);
+nos_status_t nos_ipc_send_enqueue_ex(const char *node_name, const char *uds_path, nos_buffer_t *buf);
 
 /**
  * @brief 尝试从队列中发送数据
@@ -155,6 +157,26 @@ static void nos_ipc_recv_handler(int fd, nos_ipc_conn_t *conn, nos_thread_t *thr
                     nos_sys_log_info("IPC Passive connection promoted to Node %s (FD:%d)", remote_name, fd);
                 }
             }
+        } else if (header->msg_code == NOS_IPC_MSG_SHM_EVENT) {
+            /* 处理共享内存到达事件 */
+            nos_shm_mpsc_queue_t *local_q = nos_shm_get_local_queue();
+            if (local_q) {
+                uint32_t offset;
+                while ((offset = nos_shm_mpsc_dequeue(local_q)) != 0) {
+                    nos_buffer_t *shm_buf = (nos_buffer_t*)nos_shm_offset_to_ptr(offset);
+                    if (shm_buf) {
+                        /* 关键修复：重写共享内存中的绝对指针为当前进程的合法虚拟地址 */
+                        shm_buf->raw_data = (uint8_t*)(shm_buf + 1);
+                        shm_buf->data = shm_buf->raw_data + shm_buf->headroom;
+                        
+                        atomic_fetch_add(&g_node_ctx.stats.rx_packets, 1);
+                        /* 业务线分发 */
+                        nos_service_msg_send(shm_buf);
+                        /* 释放队列带来的那一次引用计数 */
+                        nos_buffer_release(shm_buf);
+                    }
+                }
+            }
         } else {
             atomic_fetch_add(&g_node_ctx.stats.rx_packets, 1);
             atomic_fetch_add(&g_node_ctx.stats.rx_bytes, ret);
@@ -239,6 +261,43 @@ static void nos_ipc_send_hello(nos_ipc_conn_t *conn) {
         conn->tail = next_tail;
     }
     nos_buffer_release(buf);
+}
+
+nos_status_t nos_ipc_send_enqueue_shm(const char *node_name, const char *uds_path, nos_buffer_t *buf) {
+    if (!buf || buf->flags != 1) return NOS_ERR; // 必须是 SHM Buffer
+
+    nos_shm_mpsc_queue_t *remote_q = nos_shm_get_remote_queue(node_name);
+    if (!remote_q) {
+        nos_sys_log_error("SHM enqueue failed: remote node %s not found in SHM registry", node_name);
+        return NOS_ERR;
+    }
+
+    uint32_t offset = nos_shm_ptr_to_offset(buf);
+    if (offset == 0) return NOS_ERR;
+
+    nos_buffer_retain(buf); // 必须在入队前增加引用计数，防止消费者过快释放导致 Use-After-Free
+
+    /* 压入远程队列 */
+    nos_status_t st = nos_shm_mpsc_enqueue(remote_q, offset);
+    if (st != NOS_OK) {
+        nos_buffer_release(buf); // 入队失败，回退引用计数
+        nos_sys_log_warn("SHM backpressure triggered for %s (Queue Full)", node_name);
+        return st;
+    }
+
+    /* 通过控制通道 (UDS) 发送唤醒事件 */
+    nos_buffer_t *evt_buf = nos_buffer_alloc(sizeof(nos_service_msg_t), 0);
+    if (evt_buf) {
+        nos_service_msg_t *evt = (nos_service_msg_t *)evt_buf->data;
+        evt->magic = NOS_IPC_MAGIC;
+        evt->version = NOS_IPC_VERSION;
+        evt->msg_code = NOS_IPC_MSG_SHM_EVENT;
+        evt->payload_len = 0;
+        nos_ipc_send_enqueue_ex(node_name, uds_path, evt_buf);
+        nos_buffer_release(evt_buf);
+    }
+
+    return NOS_OK;
 }
 
 /**

@@ -12,6 +12,7 @@ CORE_SRCS = src/core/nos_scheduler.c \
             src/core/nos_node_mgr.c \
             src/core/nos_cli.c \
             src/infra/nos_ipc_p2p.c \
+            src/infra/nos_shm.c \
             src/infra/log/nos_log.c \
             src/infra/db/nos_kv.c \
             src/infra/timer/nos_timer.c \

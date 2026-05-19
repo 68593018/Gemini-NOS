@@ -320,8 +320,13 @@ static nos_status_t nos_transport_local_send(nos_buffer_t *buf, nos_thread_t *ta
 }
 
 static nos_status_t nos_transport_remote_uds_send(nos_buffer_t *buf, const char *node_name, const char *uds_path) {
-    extern nos_status_t nos_ipc_send_enqueue_ex(const char *node_name, const char *uds_path, nos_buffer_t *buf);
-    return nos_ipc_send_enqueue_ex(node_name, uds_path, buf);
+    if (buf->flags == 1) {
+        extern nos_status_t nos_ipc_send_enqueue_shm(const char *node_name, const char *uds_path, nos_buffer_t *buf);
+        return nos_ipc_send_enqueue_shm(node_name, uds_path, buf);
+    } else {
+        extern nos_status_t nos_ipc_send_enqueue_ex(const char *node_name, const char *uds_path, nos_buffer_t *buf);
+        return nos_ipc_send_enqueue_ex(node_name, uds_path, buf);
+    }
 }
 
 nos_status_t nos_service_msg_send(nos_buffer_t *buf) {
