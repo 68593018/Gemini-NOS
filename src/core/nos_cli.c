@@ -34,6 +34,8 @@ static void do_show_memory(const char *args);
 static void do_log(const char *args);
 static void do_perf_start(const char *args);
 static void do_perf_remote_start(const char *args);
+static void do_show_ipc(const char *args);
+static void do_clear_ipc(const char *args);
 static void do_load(const char *args);
 static void do_unload(const char *args);
 static void do_reload(const char *args);
@@ -50,6 +52,8 @@ static nos_cli_cmd_t g_cli_cmds[] = {
     {"show services",   "List all service routes",         do_show_services},
     {"show db",         "List all KV tables status",        do_show_db},
     {"show memory",     "Show process memory consumption",  do_show_memory},
+    {"show ipc",        "Show IPC statistics and status",   do_show_ipc},
+    {"clear ipc",       "Reset IPC statistics",             do_clear_ipc},
     {"log",             "Manage logging (stats, level)",    do_log},
     {"perf start",      "Start IPC performance test",       do_perf_start},
     {"perf remote",     "Start Cross-Process IPC test",     do_perf_remote_start},
@@ -226,6 +230,35 @@ static void do_load(const char *args) { if (args) node_reload_component(args); }
 static void do_reload(const char *args) { if (args) node_reload_component(args); }
 static void do_unload(const char *args) { if (args) node_unload_component(args); }
 
+static void do_show_ipc(const char *args) {
+    nos_ipc_stats_t *s = &g_node_ctx.stats;
+    printf("\n--- NOS IPC Global Statistics ---\n");
+    printf("%-15s TX: %-12lu RX: %-12lu\n", "Packets:", s->tx_packets, s->rx_packets);
+    printf("%-15s TX: %-12.2f MB RX: %-12.2f MB\n", "Volume:", 
+           (double)s->tx_bytes / (1024*1024), (double)s->rx_bytes / (1024*1024));
+    printf("%-15s TX_Err: %-8lu RX_Err: %-8lu\n", "Errors:", s->tx_errors, s->rx_errors);
+    printf("%-15s Queue_Full: %-8lu Buf_Alloc_Fail: %-8lu\n", "Drops:", 
+           s->dropped_full, s->buffer_alloc_fails);
+
+    printf("\n--- IPC Connection Status ---\n");
+    printf("%-30s %-4s %-10s %-12s %-6s\n", "UDS-Path", "FD", "Status", "Queue(H/T)", "Congest");
+    printf("----------------------------------------------------------------------------\n");
+    
+    char conn_info[16 * 256];
+    extern uint32_t nos_ipc_get_conn_snapshot(char *out_buf, uint32_t max_count);
+    uint32_t count = nos_ipc_get_conn_snapshot(conn_info, 16);
+    for (uint32_t i = 0; i < count; i++) {
+        printf("%s\n", conn_info + (i * 256));
+    }
+    printf("----------------------------------------------------------------------\n");
+}
+
+static void do_clear_ipc(const char *args) {
+    extern void nos_ipc_stats_clear(void);
+    nos_ipc_stats_clear();
+    printf("[CLI] IPC statistics cleared.\n");
+}
+
 static void handle_tab_completion(char *buf, int *pos, const char *prompt) {
     buf[*pos] = '\0';
     const char *suggestions[64];
@@ -258,8 +291,11 @@ static void handle_tab_completion(char *buf, int *pos, const char *prompt) {
             const char *perf_args[] = {"start", "remote", NULL};
             for (int i = 0; perf_args[i]; i++) if (strncmp(perf_args[i], match_start, match_len) == 0) suggestions[sug_count++] = perf_args[i];
         } else if (strncmp(buf, "show ", 5) == 0) {
-            const char *show_args[] = {"components", "services", "db", "memory", NULL};
+            const char *show_args[] = {"components", "services", "db", "memory", "ipc", NULL};
             for (int i = 0; show_args[i]; i++) if (strncmp(show_args[i], match_start, match_len) == 0) suggestions[sug_count++] = show_args[i];
+        } else if (strncmp(buf, "clear ", 6) == 0) {
+            const char *clear_args[] = {"ipc", NULL};
+            for (int i = 0; clear_args[i]; i++) if (strncmp(clear_args[i], match_start, match_len) == 0) suggestions[sug_count++] = clear_args[i];
         } else if (strncmp(buf, "load ", 5) == 0 || strncmp(buf, "unload ", 7) == 0 || strncmp(buf, "reload ", 7) == 0) {
             for (uint32_t i = 0; i < g_node_ctx.loaded_count; i++) {
                 if (strncmp(g_node_ctx.loaded_info[i].comp->name, match_start, match_len) == 0) {

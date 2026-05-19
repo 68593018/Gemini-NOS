@@ -17,6 +17,10 @@
 #define TX_QUEUE_SIZE 1024
 #define MAX_REMOTE_CONNS 16
 
+/* 流控水位线：90% 拥塞，20% 恢复 */
+#define TX_HIGH_WATERMARK 900
+#define TX_LOW_WATERMARK 200
+
 /**
  * @brief IPC 连接上下文 (支持异步发送)
  */
@@ -28,6 +32,7 @@ typedef struct {
     uint32_t tail;
     pthread_mutex_t lock;
     int is_connected;
+    int is_congested;           // 拥塞标记
     nos_thread_t *owner_thread; // 绑定的 IO 线程
 } nos_ipc_conn_t;
 
@@ -63,8 +68,18 @@ static void nos_ipc_process_tx(nos_ipc_conn_t *conn) {
             close(conn->fd);
             conn->fd = -1;
             conn->is_connected = 0;
+            conn->is_congested = 0;
             pthread_mutex_unlock(&conn->lock);
             return;
+        }
+    }
+
+    /* 检查是否可以解除拥塞状态 (队列已排干到低水位以下) */
+    if (conn->is_congested) {
+        uint32_t used = (conn->tail >= conn->head) ? (conn->tail - conn->head) : (TX_QUEUE_SIZE - (conn->head - conn->tail));
+        if (used < TX_LOW_WATERMARK) {
+            conn->is_congested = 0;
+            nos_sys_log_info("IPC backpressure relieved for %s (Queue used: %u)", conn->uds_path, used);
         }
     }
     pthread_mutex_unlock(&conn->lock);
@@ -184,6 +199,7 @@ nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
                 fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
                 conn->fd = fd;
                 conn->is_connected = 1;
+                conn->is_congested = 0;
                 /* 使用调度器标准接口注册，监听 IN 和 OUT */
                 nos_scheduler_add_fd_ex(conn->owner_thread, fd, EPOLLIN | EPOLLOUT | EPOLLET, nos_ipc_event_handler, conn);
                 nos_sys_log_info("IPC connected to %s (FD:%d)", uds_path, fd);
@@ -194,7 +210,19 @@ nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
         }
     }
 
-    /* 2. 入队 */
+    /* 2. 入队前检查背压 */
+    uint32_t used = (conn->tail >= conn->head) ? (conn->tail - conn->head) : (TX_QUEUE_SIZE - (conn->head - conn->tail));
+    if (used > TX_HIGH_WATERMARK) {
+        if (!conn->is_congested) {
+            conn->is_congested = 1;
+            nos_sys_log_warn("IPC backpressure triggered for %s (Queue used: %u)", conn->uds_path, used);
+        }
+        pthread_mutex_unlock(&conn->lock);
+        atomic_fetch_add(&g_node_ctx.stats.dropped_full, 1);
+        return NOS_ERR_BUSY;
+    }
+
+    /* 3. 入队 */
     uint32_t next_tail = (conn->tail + 1) % TX_QUEUE_SIZE;
     if (next_tail == conn->head) {
         pthread_mutex_unlock(&conn->lock);
@@ -207,7 +235,7 @@ nos_status_t nos_ipc_send_enqueue(const char *uds_path, nos_buffer_t *buf) {
     conn->tail = next_tail;
     pthread_mutex_unlock(&conn->lock);
 
-    /* 3. 如果已连接，主动触发一次尝试发送 */
+    /* 4. 如果已连接，主动触发一次尝试发送 */
     if (conn->is_connected) {
         nos_ipc_process_tx(conn);
     }
@@ -257,4 +285,30 @@ nos_status_t nos_ipc_init(nos_thread_t *thread, const char *uds_path) {
     if (listen(listen_fd, 5) < 0) { close(listen_fd); return NOS_ERR; }
 
     return nos_scheduler_add_fd(thread, listen_fd, nos_ipc_accept_handler, thread);
+}
+
+/**
+ * @brief 清理 IPC 统计数据
+ */
+void nos_ipc_stats_clear(void) {
+    memset(&g_node_ctx.stats, 0, sizeof(g_node_ctx.stats));
+}
+
+/**
+ * @brief 获取 IPC 连接镜像供 CLI 展示
+ */
+uint32_t nos_ipc_get_conn_snapshot(char *out_buf, uint32_t max_count) {
+    pthread_mutex_lock(&g_pool_lock);
+    uint32_t count = (g_remote_conn_count < max_count) ? g_remote_conn_count : max_count;
+    for (uint32_t i = 0; i < count; i++) {
+        nos_ipc_conn_t *c = &g_remote_conns[i];
+        pthread_mutex_lock(&c->lock);
+        /* 格式: Path | FD | Status | Head | Tail | Congested */
+        sprintf(out_buf + (i * 256), "%-30s %-4d %-10s %u/%u %s", 
+                c->uds_path, c->fd, c->is_connected ? "Connected" : "Failed",
+                c->head, c->tail, c->is_congested ? "YES" : "NO");
+        pthread_mutex_unlock(&c->lock);
+    }
+    pthread_mutex_unlock(&g_pool_lock);
+    return count;
 }
